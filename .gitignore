@@ -216,3 +216,21 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project secrets and local config
+.env.*
+!.env.example
+secrets.*
+*.pem
+*.key
+
+# Arduino / embedded build outputs
+*.hex
+*.elf
+*.bin
+*.uf2
+
+# macOS / editor files
+.DS_Store
+.vscode/
+.idea/
