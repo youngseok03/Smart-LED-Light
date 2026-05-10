@@ -1,0 +1,23 @@
+# Environment / Secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Runtime data (LED 색상 결정 시 누적 저장)
+python/rain_history.json
