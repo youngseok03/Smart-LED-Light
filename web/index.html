@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart LED Dashboard</title>
+
+  <!-- 구글 폰트 불러오기 -->
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Courier+Prime&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="container">
+
+  <!-- ── 헤더 ── -->
+  <header>
+    <h1>SMART <span>LED</span> DASHBOARD</h1>
+    <div class="status-dot"></div>
+  </header>
+
+  <!-- ── 메시지 배너 (data.json의 message) ── -->
+  <div class="message-banner" id="message">--</div>
+
+  <!-- ── 환경 정보 4칸 ── -->
+  <div class="grid-4">
+
+    <div class="card env-card">
+      <div class="env-card card-icon">🌡️</div>
+      <div class="card-label">Temperature</div>
+      <!-- id로 script.js에서 값을 채워줌 -->
+      <div class="card-value" id="temperature">--</div>
+      <div class="card-unit">°C</div>
+    </div>
+
+    <div class="card env-card">
+      <div class="env-card card-icon">💧</div>
+      <div class="card-label">Humidity</div>
+      <div class="card-value" id="humidity">--</div>
+      <div class="card-unit">%</div>
+    </div>
+
+    <div class="card env-card">
+      <div class="env-card card-icon">🌤️</div>
+      <div class="card-label">Weather</div>
+      <div class="card-value" style="font-size:1.1rem;padding-top:6px" id="weather">--</div>
+    </div>
+
+    <div class="card env-card">
+      <div class="env-card card-icon">🌫️</div>
+      <div class="card-label">Dust</div>
+      <div class="card-value" style="font-size:1.1rem;padding-top:6px" id="dust">--</div>
+    </div>
+
+  </div>
+
+  <!-- ── LED 컨트롤 카드 ── -->
+  <div class="led-card">
+    <h2>LED Control</h2>
+
+    <!-- LED 색상 미리보기 원 -->
+    <div class="led-preview" id="led-preview"></div>
+
+    <!-- 전원 상태 표시 + 토글 버튼 -->
+    <div class="power-row">
+      <span class="power-label">Power</span>
+      <span class="power-badge on" id="power-badge">ON</span>
+    </div>
+    <!-- 버튼 클릭 시 togglePower() 함수 실행 -->
+    <button class="btn-power" onclick="togglePower()">⏻ TOGGLE POWER</button>
+
+    <!-- 색상 선택 버튼들 -->
+    <div class="color-row">
+      <div class="card-label">Color</div>
+      <div class="color-btns">
+        <!-- data-color 값이 script.js의 COLOR_MAP 키와 일치해야 함 -->
+        <button class="btn-color" data-color="red"    style="background:#ef4444" onclick="setColor('red')"></button>
+        <button class="btn-color" data-color="orange" style="background:#f97316" onclick="setColor('orange')"></button>
+        <button class="btn-color" data-color="yellow" style="background:#facc15" onclick="setColor('yellow')"></button>
+        <button class="btn-color" data-color="green"  style="background:#4ade80" onclick="setColor('green')"></button>
+        <button class="btn-color" data-color="blue"   style="background:#38bdf8" onclick="setColor('blue')"></button>
+        <button class="btn-color" data-color="purple" style="background:#a78bfa" onclick="setColor('purple')"></button>
+        <button class="btn-color" data-color="white"  style="background:#f1f5f9" onclick="setColor('white')"></button>
+      </div>
+    </div>
+
+    <!-- 밝기 슬라이더 -->
+    <div class="brightness-row">
+      <div class="card-label">Brightness</div>
+      <!-- oninput: 슬라이더 움직일 때마다 setBrightness() 호출 -->
+      <input type="range" id="brightness-slider" min="0" max="100" value="70"
+             oninput="setBrightness(this.value)" />
+      <div class="brightness-val" id="brightness-val">70%</div>
+    </div>
+
+    <!-- 자동/수동 모드 버튼 -->
+    <div class="mode-row">
+      <button class="btn-mode" data-mode="auto"   onclick="setMode('auto')">AUTO</button>
+      <button class="btn-mode" data-mode="manual" onclick="setMode('manual')">MANUAL</button>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- script.js는 HTML이 다 로드된 후 실행 -->
+<script src="script.js"></script>
+</body>
+</html>
