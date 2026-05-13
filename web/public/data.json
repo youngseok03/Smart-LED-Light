@@ -1,0 +1,42 @@
+{
+  "device": {
+    "name": "Smart Bedroom LED",
+    "connection": "demo",
+    "lastSync": "2026-05-11 20:30",
+    "serial": "USB Serial standby"
+  },
+  "indoor": {
+    "temperature": 24,
+    "humidity": 55,
+    "airQuality": "Good",
+    "dust": "Normal",
+    "motion": false,
+    "illuminance": 18
+  },
+  "weather": {
+    "status": "Rain",
+    "sky": "흐림",
+    "rainType": "비",
+    "rainfall": 1.2,
+    "wind": 2.1,
+    "outsideTemperature": 21
+  },
+  "led": {
+    "power": true,
+    "mode": "auto",
+    "colorName": "연한 초록",
+    "rgb": [200, 255, 220],
+    "brightness": 70
+  },
+  "footLight": {
+    "power": false,
+    "auto": true,
+    "trigger": "어두움 + 움직임 감지 시 점등",
+    "timeoutSeconds": 20
+  },
+  "lcd": {
+    "line1": "Indoor 24C / 55%",
+    "line2": "Rain - Take umbrella",
+    "message": "비가 와요. 우산을 챙기세요."
+  }
+}

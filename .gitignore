@@ -21,3 +21,7 @@ Thumbs.db
 
 # Runtime data (LED 색상 결정 시 누적 저장)
 python/rain_history.json
+
+# Frontend
+node_modules/
+dist/
