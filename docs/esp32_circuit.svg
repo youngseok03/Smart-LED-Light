@@ -1,0 +1,156 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="950" viewBox="0 0 1400 950">
+  <defs>
+    <style>
+      .title { font: 700 30px Arial, sans-serif; fill: #17202a; }
+      .sub { font: 16px Arial, sans-serif; fill: #44515f; }
+      .box { fill: #ffffff; stroke: #27384a; stroke-width: 2; rx: 8; }
+      .board { fill: #e8f4ee; stroke: #1f7a4d; stroke-width: 3; rx: 10; }
+      .power { fill: #fff5e6; stroke: #9b6b16; stroke-width: 2; rx: 8; }
+      .note { fill: #f7f9fc; stroke: #b9c1cc; stroke-width: 1.5; rx: 8; }
+      .label { font: 15px Arial, sans-serif; fill: #17202a; }
+      .small { font: 13px Arial, sans-serif; fill: #354252; }
+      .pin { font: 700 14px Arial, sans-serif; fill: #0f5132; }
+      .wire33 { stroke: #d88900; stroke-width: 3; fill: none; }
+      .wire5 { stroke: #d12b2b; stroke-width: 3; fill: none; }
+      .wire12 { stroke: #9b2bd1; stroke-width: 3; fill: none; }
+      .wireg { stroke: #252a31; stroke-width: 3; fill: none; }
+      .wires { stroke: #1f66c1; stroke-width: 3; fill: none; }
+      .wirei2c { stroke: #008c95; stroke-width: 3; fill: none; }
+      .wirepwm { stroke: #d14a8b; stroke-width: 3; fill: none; }
+      .wireanalog { stroke: #6b8e23; stroke-width: 3; fill: none; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="950" fill="#f2f5f8"/>
+  <text x="48" y="52" class="title">ESP32 Smart LED Light 회로도</text>
+  <text x="48" y="80" class="sub">ESP32 DevKit V1 기준. 모든 외부 전원의 GND는 ESP32 GND와 공통 접지.</text>
+
+  <!-- ESP32 board -->
+  <rect x="560" y="130" width="280" height="560" class="board"/>
+  <text x="632" y="168" class="title" style="font-size:26px">ESP32 DevKit V1</text>
+  <text x="590" y="210" class="pin">3V3</text>
+  <text x="590" y="242" class="pin">GND</text>
+  <text x="590" y="274" class="pin">GPIO4  DHT11</text>
+  <text x="590" y="306" class="pin">GPIO21 SDA</text>
+  <text x="590" y="338" class="pin">GPIO22 SCL</text>
+  <text x="590" y="370" class="pin">GPIO18 NeoPixel</text>
+  <text x="590" y="402" class="pin">GPIO19 Foot PWM</text>
+  <text x="590" y="434" class="pin">GPIO23 Dust LED</text>
+  <text x="590" y="466" class="pin">GPIO25 Button 1</text>
+  <text x="590" y="498" class="pin">GPIO26 Button 2</text>
+  <text x="590" y="530" class="pin">GPIO27 PIR</text>
+  <text x="590" y="562" class="pin">GPIO34 LDR ADC</text>
+  <text x="590" y="594" class="pin">GPIO35 Dust ADC</text>
+  <text x="590" y="642" class="small">USB Serial 115200 / Wi-Fi Web Control</text>
+
+  <!-- Power -->
+  <rect x="50" y="120" width="250" height="115" class="power"/>
+  <text x="76" y="154" class="label" style="font-weight:700">외부 5V 전원</text>
+  <text x="76" y="184" class="small">NeoPixel, GP2Y1014AU</text>
+  <text x="76" y="209" class="small">5V LED 스트립 사용 시 +</text>
+
+  <rect x="50" y="260" width="250" height="95" class="power"/>
+  <text x="76" y="294" class="label" style="font-weight:700">외부 12V 전원 옵션</text>
+  <text x="76" y="324" class="small">12V LED 스트립 전용</text>
+
+  <rect x="50" y="390" width="250" height="80" class="note"/>
+  <text x="74" y="422" class="label" style="font-weight:700">공통 접지</text>
+  <text x="74" y="448" class="small">외부전원 - 와 ESP32 GND 연결</text>
+
+  <!-- Input components -->
+  <rect x="60" y="535" width="225" height="92" class="box"/>
+  <text x="84" y="566" class="label" style="font-weight:700">DHT11</text>
+  <text x="84" y="594" class="small">VCC 3V3, GND</text>
+  <text x="84" y="616" class="small">DATA -> GPIO4, 10k pull-up</text>
+
+  <rect x="60" y="665" width="225" height="98" class="box"/>
+  <text x="84" y="696" class="label" style="font-weight:700">LDR 조도 센서</text>
+  <text x="84" y="724" class="small">3V3 - LDR - GPIO34 - 10k - GND</text>
+  <text x="84" y="746" class="small">어두울수록 ADC 값 감소</text>
+
+  <rect x="60" y="795" width="225" height="86" class="box"/>
+  <text x="84" y="826" class="label" style="font-weight:700">PIR 모션 센서</text>
+  <text x="84" y="854" class="small">OUT -> GPIO27</text>
+  <text x="84" y="876" class="small">VCC/GND는 모듈 사양 확인</text>
+
+  <!-- LCD -->
+  <rect x="1015" y="115" width="285" height="115" class="box"/>
+  <text x="1040" y="150" class="label" style="font-weight:700">Arduino Text LCD 2004 I2C</text>
+  <text x="1040" y="180" class="small">SDA -> GPIO21, SCL -> GPIO22</text>
+  <text x="1040" y="205" class="small">5V I2C pull-up이면 레벨 시프터 사용</text>
+
+  <!-- NeoPixel -->
+  <rect x="1015" y="265" width="285" height="115" class="box"/>
+  <text x="1040" y="300" class="label" style="font-weight:700">NeoPixel / RGB 무드등</text>
+  <text x="1040" y="330" class="small">DIN -> GPIO18 + 330 ohm</text>
+  <text x="1040" y="355" class="small">5V/GND, 1000 uF 커패시터 권장</text>
+
+  <!-- Foot LED MOSFET -->
+  <rect x="1015" y="415" width="285" height="150" class="box"/>
+  <text x="1040" y="450" class="label" style="font-weight:700">침대 아래 LED 스트립</text>
+  <text x="1040" y="480" class="small">+ -> 외부 전원 +</text>
+  <text x="1040" y="505" class="small">- -> MOSFET Drain</text>
+  <text x="1040" y="530" class="small">Source -> GND, Gate -> GPIO19</text>
+  <text x="1040" y="552" class="small">Gate: 100 ohm 직렬, 10k pulldown</text>
+
+  <!-- Dust -->
+  <rect x="1015" y="610" width="285" height="210" class="box"/>
+  <text x="1040" y="645" class="label" style="font-weight:700">GP2Y1014AU 먼지 센서</text>
+  <text x="1040" y="675" class="small">Pin1 V-LED -> 150 ohm -> 5V</text>
+  <text x="1040" y="700" class="small">Pin2 LED-GND -> GND</text>
+  <text x="1040" y="725" class="small">Pin3 LED -> NPN/MOSFET -> GPIO23</text>
+  <text x="1040" y="750" class="small">Pin4 S-GND -> GND, Pin6 Vcc -> 5V</text>
+  <text x="1040" y="775" class="small">Pin5 Vo -> 10k/20k 분압 -> GPIO35</text>
+  <text x="1040" y="800" class="small">V-LED와 GND 사이 220 uF</text>
+
+  <!-- Buttons -->
+  <rect x="365" y="735" width="250" height="100" class="box"/>
+  <text x="390" y="768" class="label" style="font-weight:700">버튼 2개</text>
+  <text x="390" y="798" class="small">GPIO25 -> 버튼 -> GND</text>
+  <text x="390" y="822" class="small">GPIO26 -> 버튼 -> GND</text>
+
+  <!-- Wires from board to components -->
+  <path d="M560 205 C430 205 430 175 300 175" class="wire33"/>
+  <text x="320" y="164" class="small">3V3</text>
+  <path d="M560 238 C430 238 430 430 300 430" class="wireg"/>
+  <text x="315" y="418" class="small">GND 공통</text>
+
+  <path d="M560 270 C400 270 390 580 285 580" class="wires"/>
+  <text x="330" y="560" class="small">GPIO4</text>
+  <path d="M560 558 C420 558 405 715 285 715" class="wireanalog"/>
+  <text x="330" y="700" class="small">GPIO34 ADC</text>
+  <path d="M560 526 C430 526 410 835 285 835" class="wires"/>
+  <text x="330" y="820" class="small">GPIO27</text>
+
+  <path d="M840 302 C940 302 930 164 1015 164" class="wirei2c"/>
+  <path d="M840 334 C950 334 940 190 1015 190" class="wirei2c"/>
+  <text x="890" y="290" class="small">SDA/SCL</text>
+
+  <path d="M840 366 C930 366 940 322 1015 322" class="wires"/>
+  <text x="884" y="350" class="small">GPIO18</text>
+  <path d="M300 175 C695 105 1040 252 1040 330" class="wire5"/>
+  <text x="720" y="117" class="small">외부 5V</text>
+
+  <path d="M840 398 C930 398 930 525 1015 525" class="wirepwm"/>
+  <text x="885" y="430" class="small">GPIO19 PWM</text>
+  <path d="M300 300 C690 300 905 468 1015 468" class="wire12"/>
+  <text x="620" y="288" class="small">5V/12V LED 전원 +</text>
+
+  <path d="M840 430 C930 430 930 725 1015 725" class="wires"/>
+  <text x="880" y="600" class="small">GPIO23 dust LED driver</text>
+  <path d="M840 590 C930 590 930 775 1015 775" class="wireanalog"/>
+  <text x="880" y="780" class="small">GPIO35 ADC</text>
+
+  <path d="M560 462 C520 462 520 770 615 770" class="wires"/>
+  <path d="M560 494 C505 494 505 800 615 800" class="wires"/>
+  <path d="M365 795 C330 795 330 430 300 430" class="wireg"/>
+
+  <!-- Ground bus hints -->
+  <path d="M300 430 C710 885 1010 835 1160 820" class="wireg"/>
+  <text x="693" y="884" class="small">GND common bus</text>
+
+  <!-- Notes -->
+  <rect x="360" y="865" width="680" height="58" class="note"/>
+  <text x="385" y="895" class="label" style="font-weight:700">주의</text>
+  <text x="440" y="895" class="small">ESP32 GPIO에는 5V 신호를 직접 넣지 마세요. LCD I2C, PIR OUT, 먼지 센서 Vo는 3.3V 이하인지 확인합니다.</text>
+</svg>
