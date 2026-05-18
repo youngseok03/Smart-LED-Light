@@ -6,7 +6,7 @@
 
 - 침대 위 무드등: 날씨/실내 환경/웹 명령에 따라 NeoPixel RGB LED 색상과 밝기 제어
 - 침대 아래 잔등: LDR 조도 센서와 PIR 모션 센서가 동시에 조건을 만족할 때만 LED 스트립 자동 점등
-- 환경 표시: DHT11 온습도, GP2Y1014AU 먼지 센서, 외부 날씨 메시지를 20x4 I2C LCD에 순환 출력
+- 환경 표시: DHT11 온습도, GP2Y1014AU 먼지 센서, 외부 날씨 메시지를 1.3인치 I2C OLED에 순환 출력
 - 사용자 입력: 버튼 1은 수동 색상 변경/자동 모드 전환, 버튼 2는 전원/밝기 조절
 - 통신: ESP32 내장 Wi-Fi 웹 제어 + USB Serial 명령 수신
 
@@ -14,8 +14,8 @@
 
 | 기능 | 부품/신호 | ESP32 핀 | 전압/주의 |
 |---|---|---:|---|
-| I2C SDA | LCD 2004 I2C SDA | GPIO21 | LCD I2C 풀업이 5V면 레벨 시프터 필요 |
-| I2C SCL | LCD 2004 I2C SCL | GPIO22 | LCD I2C 풀업이 5V면 레벨 시프터 필요 |
+| I2C SDA | YwRobot 1.3 OLED SDA | GPIO21 | DIS070012, SH1106 128x64 I2C |
+| I2C SCL | YwRobot 1.3 OLED SCL | GPIO22 | 기본 주소 0x3C, 안 뜨면 0x3D 확인 |
 | 온습도 | DHT11 DATA | GPIO4 | 3.3V 구동, DATA에 10k pull-up 권장 |
 | 무드등 | NeoPixel DIN | GPIO18 | 330 ohm 직렬 저항 권장 |
 | 발밑등 | MOSFET Gate | GPIO19 | 100 ohm 직렬 + 10k pulldown |
@@ -46,14 +46,14 @@
 - DATA -> GPIO4
 - DATA와 3V3 사이에 10k pull-up 저항
 
-### 20x4 I2C LCD
+### 1.3인치 I2C OLED (YwRobot DIS070012)
 
 - SDA -> GPIO21
 - SCL -> GPIO22
-- VCC -> 3.3V에서 동작하면 ESP32 3V3
+- VCC -> ESP32 3V3 권장
 - GND -> ESP32 GND
 
-LCD I2C 백팩이 5V 전용이고 SDA/SCL pull-up도 5V에 묶인 경우 ESP32 GPIO가 손상될 수 있습니다. 이때는 I2C 레벨 시프터를 넣거나 3.3V 동작 가능한 LCD 백팩을 사용하세요.
+코드는 `U8g2` 라이브러리의 `U8G2_SH1106_128X64_NONAME_F_HW_I2C` 생성자를 사용합니다. 화면이 켜지지 않으면 `OLED_I2C_ADDR` 값을 `0x3D`로 바꿔 테스트하세요.
 
 ### NeoPixel RGB LED
 
@@ -179,6 +179,6 @@ SENSOR,tempC,humidity,dustUgM3,ldrRaw,dark,motion,mode,power,brightness,r,g,b
   - DHT sensor library
   - Adafruit Unified Sensor
   - Adafruit NeoPixel
-  - LiquidCrystal_I2C
+  - U8g2
 
 ESP32 Arduino Core 3.x에서는 LEDC API가 바뀌었기 때문에 코드에 2.x/3.x 호환 처리를 넣어두었습니다.

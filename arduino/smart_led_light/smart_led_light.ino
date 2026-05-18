@@ -2,7 +2,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Wire.h>
-#include <LiquidCrystal_I2C.h>
+#include <U8g2lib.h>
 #include <DHT.h>
 #include <Adafruit_NeoPixel.h>
 
@@ -18,7 +18,7 @@
     - DHT sensor library
     - Adafruit Unified Sensor
     - Adafruit NeoPixel
-    - LiquidCrystal_I2C
+    - U8g2
 
   Serial command examples from PC/Python:
     RGB,120,240,230
@@ -52,16 +52,16 @@ const uint8_t I2C_SCL = 22;
 
 // ---------- Hardware constants ----------
 const uint8_t DHT_TYPE = DHT11;
-const uint8_t LCD_ADDR = 0x27;  // Change to 0x3F if your LCD backpack uses 0x3F.
-const uint8_t LCD_COLS = 20;
-const uint8_t LCD_ROWS = 4;
+const uint8_t OLED_I2C_ADDR = 0x3C;  // Try 0x3D if an I2C scanner finds that address.
+const uint8_t OLED_WIDTH = 128;
+const uint8_t OLED_HEIGHT = 64;
 const uint16_t MOOD_LED_COUNT = 16;
 
 const int DARK_THRESHOLD = 1600;       // Calibrate after checking raw LDR values.
 const uint32_t FOOT_HOLD_MS = 20000;   // Keep foot light on after last motion.
 const uint32_t SENSOR_MS = 2000;
 const uint32_t DUST_MS = 10000;
-const uint32_t LCD_MS = 3000;
+const uint32_t DISPLAY_MS = 3000;
 const uint32_t STATUS_MS = 5000;
 const uint32_t DEBOUNCE_MS = 35;
 const uint32_t LONG_PRESS_MS = 800;
@@ -79,7 +79,8 @@ const float DUST_NO_DUST_VOLTAGE = 0.60;  // Typical. Calibrate for your sensor.
 const float DUST_SENSITIVITY = 0.50;      // V per 100 ug/m3, rough GP2Y101x value.
 
 DHT dht(PIN_DHT, DHT_TYPE);
-LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
+// DIS070012/YwRobot 1.3" OLED examples use the SH1106 128x64 driver.
+U8G2_SH1106_128X64_NONAME_F_HW_I2C oled(U8G2_R0, U8X8_PIN_NONE);
 Adafruit_NeoPixel moodStrip(MOOD_LED_COUNT, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
 WebServer server(80);
 
@@ -143,10 +144,10 @@ const uint8_t manualPaletteSize = sizeof(manualPalette) / sizeof(manualPalette[0
 
 uint32_t lastSensorAt = 0;
 uint32_t lastDustAt = 0;
-uint32_t lastLcdAt = 0;
+uint32_t lastDisplayAt = 0;
 uint32_t lastStatusAt = 0;
 uint32_t lastMotionAt = 0;
-uint8_t lcdPage = 0;
+uint8_t displayPage = 0;
 String serialLine;
 
 String modeName() {
@@ -181,21 +182,46 @@ String ipText() {
   return WiFi.localIP().toString();
 }
 
-String clipped(String text, uint8_t width) {
+String cleanDisplayText(String text) {
   text.replace("\r", " ");
   text.replace("\n", " ");
-  if (text.length() > width) {
-    return text.substring(0, width);
-  }
-  while (text.length() < width) {
-    text += ' ';
+  return text;
+}
+
+String clippedForOled(String text, uint8_t maxWidthPx) {
+  text = cleanDisplayText(text);
+  while (text.length() > 0 && oled.getStrWidth(text.c_str()) > maxWidthPx) {
+    text.remove(text.length() - 1);
   }
   return text;
 }
 
-void lcdLine(uint8_t row, const String &text) {
-  lcd.setCursor(0, row);
-  lcd.print(clipped(text, LCD_COLS));
+void oledText(int16_t x, int16_t y, const String &text, uint8_t maxWidthPx = OLED_WIDTH) {
+  String clipped = clippedForOled(text, maxWidthPx);
+  oled.drawStr(x, y, clipped.c_str());
+}
+
+void oledHeader(const String &title) {
+  oled.setFont(u8g2_font_6x10_tf);
+  oledText(0, 9, title);
+  oled.drawHLine(0, 12, OLED_WIDTH);
+}
+
+void oledLine(uint8_t row, const String &text) {
+  const uint8_t yPositions[] = {24, 36, 48, OLED_HEIGHT - 4};
+  if (row >= sizeof(yPositions) / sizeof(yPositions[0])) {
+    return;
+  }
+  oledText(0, yPositions[row], text);
+}
+
+void drawDisplayMessage(const String &title, const String &line1, const String &line2 = "", const String &line3 = "") {
+  oled.clearBuffer();
+  oledHeader(title);
+  oledLine(0, line1);
+  oledLine(1, line2);
+  oledLine(2, line3);
+  oled.sendBuffer();
 }
 
 void setMoodColor(uint8_t r, uint8_t g, uint8_t b) {
@@ -391,39 +417,46 @@ void handleButtons() {
   }
 }
 
-void drawLcd() {
-  if (lcdPage == 0) {
+void drawDisplay() {
+  oled.clearBuffer();
+
+  if (displayPage == 0) {
     String temp = isnan(sensors.tempC) ? "--" : String(sensors.tempC, 1);
     String hum = isnan(sensors.humidity) ? "--" : String(sensors.humidity, 0);
-    lcdLine(0, "Indoor " + temp + "C " + hum + "%");
-    lcdLine(1, "Dust " + String(sensors.dustUgM3, 0) + " ug/m3");
-    lcdLine(2, "LDR " + String(sensors.ldrRaw) + (sensors.dark ? " Dark" : " Bright"));
-    lcdLine(3, sensors.motion ? "Motion detected" : "No motion");
-  } else if (lcdPage == 1) {
-    lcdLine(0, "Weather " + weather.summary);
+    oledHeader("Indoor / Air");
+    oledLine(0, "Temp " + temp + "C  Hum " + hum + "%");
+    oledLine(1, "Dust " + String(sensors.dustUgM3, 0) + " ug/m3");
+    oledLine(2, "LDR " + String(sensors.ldrRaw) + (sensors.dark ? " Dark" : " Bright"));
+    oledLine(3, sensors.motion ? "Motion detected" : "No motion");
+  } else if (displayPage == 1) {
+    oledHeader("Weather");
+    oledLine(0, weather.summary);
     if (weather.hasData) {
-      lcdLine(1, "Out " + String(weather.outdoorTemp, 1) + "C " + String(weather.outdoorHumidity) + "%");
-      lcdLine(2, "Rain " + String(weather.rainMm, 1) + "mm");
+      oledLine(1, "Out " + String(weather.outdoorTemp, 1) + "C  " + String(weather.outdoorHumidity) + "%");
+      oledLine(2, "Rain " + String(weather.rainMm, 1) + "mm");
     } else {
-      lcdLine(1, "Waiting PC/API");
-      lcdLine(2, "Serial or Web cmd");
+      oledLine(1, "Waiting PC/API");
+      oledLine(2, "Serial or Web cmd");
     }
-    lcdLine(3, weather.message);
+    oledLine(3, weather.message);
   } else {
-    lcdLine(0, "Mood " + modeName() + (light.powerOn ? " ON" : " OFF"));
-    lcdLine(1, "Bright " + String(light.brightness) + "%");
-    lcdLine(2, "RGB " + String(light.targetR) + "," + String(light.targetG) + "," + String(light.targetB));
-    lcdLine(3, "IP " + ipText());
+    oledHeader("Mood / Network");
+    oledLine(0, modeName() + String(light.powerOn ? " ON" : " OFF"));
+    oledLine(1, "Bright " + String(light.brightness) + "%");
+    oledLine(2, "RGB " + String(light.targetR) + "," + String(light.targetG) + "," + String(light.targetB));
+    oledLine(3, "IP " + ipText());
   }
+
+  oled.sendBuffer();
 }
 
-void updateLcd() {
-  if (millis() - lastLcdAt < LCD_MS) {
+void updateDisplay() {
+  if (millis() - lastDisplayAt < DISPLAY_MS) {
     return;
   }
-  lastLcdAt = millis();
-  lcdPage = (lcdPage + 1) % 3;
-  drawLcd();
+  lastDisplayAt = millis();
+  displayPage = (displayPage + 1) % 3;
+  drawDisplay();
 }
 
 void printStatus() {
@@ -515,7 +548,7 @@ void handleCommand(String line) {
     Serial.println("OK,BRIGHT");
   } else if (cmd == "MSG") {
     weather.message = token(line, 1);
-    drawLcd();
+    drawDisplay();
     Serial.println("OK,MSG");
   } else if (cmd == "WEATHER") {
     weather.summary = token(line, 1);
@@ -527,7 +560,7 @@ void handleCommand(String line) {
     if (light.mode == MODE_AUTO) {
       updateMoodByMode();
     }
-    drawLcd();
+    drawDisplay();
     Serial.println("OK,WEATHER");
   } else if (cmd == "STATUS") {
     printStatus();
@@ -641,7 +674,7 @@ void handleApiWeather() {
   if (light.mode == MODE_AUTO) {
     updateMoodByMode();
   }
-  drawLcd();
+  drawDisplay();
   server.send(200, "application/json", statusJson());
 }
 
@@ -699,10 +732,9 @@ void setup() {
   writeFootPwm(0);
 
   Wire.begin(I2C_SDA, I2C_SCL);
-  lcd.init();
-  lcd.backlight();
-  lcdLine(0, "Smart LED ESP32");
-  lcdLine(1, "Starting...");
+  oled.setI2CAddress(OLED_I2C_ADDR << 1);
+  oled.begin();
+  drawDisplayMessage("Smart LED ESP32", "Starting...");
 
   dht.begin();
   moodStrip.begin();
@@ -712,8 +744,8 @@ void setup() {
   setupWifi();
   setupWebServer();
 
-  lcdLine(2, "Web " + ipText());
-  lcdLine(3, "Serial 115200");
+  drawDisplayMessage("Smart LED ESP32", "Web " + ipText(), "Serial 115200");
+  lastDisplayAt = millis();
   Serial.println("READY,SMART_LED_ESP32");
 }
 
@@ -722,6 +754,6 @@ void loop() {
   readSerialCommands();
   handleButtons();
   updateSensors();
-  updateLcd();
+  updateDisplay();
   updateSerialStatus();
 }

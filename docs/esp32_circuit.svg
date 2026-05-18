@@ -73,11 +73,11 @@
   <text x="84" y="854" class="small">OUT -> GPIO27</text>
   <text x="84" y="876" class="small">VCC/GND는 모듈 사양 확인</text>
 
-  <!-- LCD -->
+  <!-- OLED -->
   <rect x="1015" y="115" width="285" height="115" class="box"/>
-  <text x="1040" y="150" class="label" style="font-weight:700">Arduino Text LCD 2004 I2C</text>
+  <text x="1040" y="150" class="label" style="font-weight:700">YwRobot 1.3" OLED I2C</text>
   <text x="1040" y="180" class="small">SDA -> GPIO21, SCL -> GPIO22</text>
-  <text x="1040" y="205" class="small">5V I2C pull-up이면 레벨 시프터 사용</text>
+  <text x="1040" y="205" class="small">VCC 3V3, SH1106 128x64, addr 0x3C</text>
 
   <!-- NeoPixel -->
   <rect x="1015" y="265" width="285" height="115" class="box"/>
@@ -152,5 +152,5 @@
   <!-- Notes -->
   <rect x="360" y="865" width="680" height="58" class="note"/>
   <text x="385" y="895" class="label" style="font-weight:700">주의</text>
-  <text x="440" y="895" class="small">ESP32 GPIO에는 5V 신호를 직접 넣지 마세요. LCD I2C, PIR OUT, 먼지 센서 Vo는 3.3V 이하인지 확인합니다.</text>
+  <text x="440" y="895" class="small">ESP32 GPIO에는 5V 신호를 직접 넣지 마세요. OLED I2C, PIR OUT, 먼지 센서 Vo는 3.3V 이하인지 확인합니다.</text>
 </svg>
