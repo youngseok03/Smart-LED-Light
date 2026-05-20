@@ -1,45 +1,46 @@
-#include <Arduino.h>
-
 /*
-  LDR light sensor standalone test for ESP32 DevKit V1
+  LDR light sensor standalone test for Arduino Uno R3.
 
-  Wiring used by the main project:
-    ESP32 3V3 -> LDR -> GPIO34 -> 10k resistor -> GND
+  Wiring for an LDR module with analog output:
+    LDR VCC / +  -> Arduino 5V
+    LDR GND / -  -> Arduino GND
+    LDR AO / A0  -> Arduino A0
 
-  With this divider, ADC value increases when it is bright
-  and decreases when it is dark.
+  Serial Monitor:
+    9600 baud
 
-  Serial Monitor: 115200 baud
+  Note:
+    Some modules output a higher value in bright light.
+    Others output a higher value in darkness.
+    The important first test is that the raw value changes when light changes.
 */
 
-const uint8_t PIN_LDR = 34;       // ADC1 input-only pin
-const int DARK_THRESHOLD = 1600;  // Calibrate after checking your room values.
-const uint32_t READ_INTERVAL_MS = 500;
+const int LDR_PIN = A0;
+const int SAMPLE_DELAY_MS = 500;
 
-uint32_t lastReadAt = 0;
+// Tune this after checking your room's raw readings.
+const int DARK_THRESHOLD = 400;
 
 void setup() {
-  Serial.begin(115200);
-  delay(300);
+  Serial.begin(9600);
+  pinMode(LDR_PIN, INPUT);
 
-  analogReadResolution(12);
-  analogSetPinAttenuation(PIN_LDR, ADC_11db);
-
-  Serial.println("LDR light sensor test started");
-  Serial.println("Format: LDR raw, estimated state");
+  Serial.println("LDR light sensor test");
+  Serial.println("Cover the sensor and shine light on it.");
+  Serial.println("raw, percent, state");
 }
 
 void loop() {
-  if (millis() - lastReadAt < READ_INTERVAL_MS) {
-    return;
-  }
-  lastReadAt = millis();
+  int raw = analogRead(LDR_PIN);
+  int percent = map(raw, 0, 1023, 0, 100);
+  const char *state = raw < DARK_THRESHOLD ? "DARK" : "BRIGHT";
 
-  int ldrRaw = analogRead(PIN_LDR);
-  bool isDark = ldrRaw < DARK_THRESHOLD;
+  Serial.print("raw=");
+  Serial.print(raw);
+  Serial.print(" percent=");
+  Serial.print(percent);
+  Serial.print("% state=");
+  Serial.println(state);
 
-  Serial.print("LDR: ");
-  Serial.print(ldrRaw);
-  Serial.print(", State: ");
-  Serial.println(isDark ? "Dark" : "Bright");
+  delay(SAMPLE_DELAY_MS);
 }

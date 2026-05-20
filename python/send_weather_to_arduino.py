@@ -20,9 +20,10 @@ BRIDGE_HOST = "127.0.0.1"
 BRIDGE_PORT = 8765
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_FILE = PROJECT_ROOT / "web" / "public" / "data.json"
+OLED_WIDTH_CHARS = 21
 
 
-def sanitize_lcd_text(value, width=20):
+def sanitize_display_text(value, width=OLED_WIDTH_CHARS):
     text = str(value).replace("|", " ").replace("\n", " ").strip()
     return text[:width]
 
@@ -37,6 +38,19 @@ def parse_bool(value):
         if lowered in {"0", "false", "off", "no"}:
             return False
     raise ValueError("expected boolean power value")
+
+
+def parse_percent(value):
+    number = int(value)
+    return max(0, min(100, number))
+
+
+def parse_mode(value):
+    mode = str(value).strip().upper()
+    allowed_modes = {"AUTO", "MANUAL", "REST", "STUDY"}
+    if mode not in allowed_modes:
+        raise ValueError("expected mode to be AUTO, MANUAL, REST, or STUDY")
+    return mode
 
 
 def load_dashboard_data(data_file):
@@ -76,12 +90,12 @@ def build_lcd_lines(data):
 
     power_text = "ON" if led.get("power", True) else "OFF"
     brightness = led.get("brightness", 0)
-    line1 = f"Smart LED {power_text} {brightness}%"
-    line2 = f"{weather.get('status', 'Weather')} {weather.get('outsideTemperature', '-')}C"
-    line3 = f"In {indoor.get('temperature', '-')}C H{indoor.get('humidity', '-')}%"
+    line1 = f"LED {power_text} {brightness}%"
+    line2 = f"W:{weather.get('status', '-')} {weather.get('outsideTemperature', '-')}C"
+    line3 = f"In:{indoor.get('temperature', '-')}C H{indoor.get('humidity', '-')}%"
     line4 = ai_message
 
-    return [sanitize_lcd_text(line) for line in (line1, line2, line3, line4)]
+    return [sanitize_display_text(line) for line in (line1, line2, line3, line4)]
 
 
 def build_display_message(data):
@@ -208,7 +222,7 @@ def make_handler(bridge, data_file):
             self._send_json(404, {"ok": False, "error": "not found"})
 
         def do_POST(self):
-            if self.path not in {"/lcd", "/power"}:
+            if self.path not in {"/lcd", "/power", "/brightness", "/mode"}:
                 self._send_json(404, {"ok": False, "error": "not found"})
                 return
 
@@ -217,19 +231,29 @@ def make_handler(bridge, data_file):
 
             try:
                 payload = json.loads(raw_body.decode("utf-8"))
-                power = parse_bool(payload["power"])
+                if self.path == "/brightness":
+                    brightness = parse_percent(payload["brightness"])
+                    command = f"CMD,BRIGHT,{brightness}\n"
+                    response_payload = {"ok": True, "brightness": brightness, "sent": command.strip()}
+                elif self.path == "/mode":
+                    mode = parse_mode(payload["mode"])
+                    command = f"CMD,MODE,{mode}\n"
+                    response_payload = {"ok": True, "mode": mode, "sent": command.strip()}
+                else:
+                    power = parse_bool(payload["power"])
+                    command = "CMD,POWER,ON\n" if power else "CMD,POWER,OFF\n"
+                    response_payload = {"ok": True, "power": power, "sent": command.strip()}
             except Exception as error:
                 self._send_json(400, {"ok": False, "error": str(error)})
                 return
 
-            command = "CMD,POWER,ON\n" if power else "CMD,POWER,OFF\n"
             try:
                 bridge.send_line(command)
             except Exception as error:
                 self._send_json(500, {"ok": False, "error": str(error)})
                 return
 
-            self._send_json(200, {"ok": True, "power": power, "sent": command.strip()})
+            self._send_json(200, response_payload)
 
         def log_message(self, format, *args):
             return

@@ -35,13 +35,13 @@
     "timeoutSeconds": 20
   },
   "lcd": {
-    "line1": "Smart LED ON 70%",
-    "line2": "Rain 21C / In 24C",
+    "line1": "LED ON 70%",
+    "line2": "W:Rain 21C",
     "message": "Take umbrella"
   },
   "ai": {
     "provider": "dummy",
     "message": "Take umbrella",
-    "reason": "Rainy weather dummy data for Arduino Uno LCD test"
+    "reason": "Rainy weather dummy data for Arduino Uno OLED test"
   }
 }

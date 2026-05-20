@@ -85,6 +85,8 @@ const colorPresets: ColorPreset[] = [
 
 const modes: LedMode[] = ["auto", "manual", "rest", "study"];
 const bridgeUrl = "http://127.0.0.1:8765/power";
+const brightnessUrl = "http://127.0.0.1:8765/brightness";
+const modeUrl = "http://127.0.0.1:8765/mode";
 
 function rgbValue(rgb: [number, number, number]) {
   return `rgb(${rgb.join(", ")})`;
@@ -157,7 +159,7 @@ function wheelPointFromRgb(rgb: [number, number, number]) {
   };
 }
 
-function App() {
+export default function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loadError, setLoadError] = useState("");
   const [led, setLed] = useState<LedState>({
@@ -258,6 +260,47 @@ function App() {
     }
   }
 
+  async function sendBrightness(brightness: number) {
+    setBridgeStatus("Sending...");
+
+    try {
+      const response = await fetch(brightnessUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brightness }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setBridgeStatus(`LED brightness ${brightness}% sent`);
+    } catch (error) {
+      console.error("Arduino brightness request failed", error);
+      setBridgeStatus("Bridge offline");
+    }
+  }
+
+  function updateBrightness(brightness: number) {
+    const nextBrightness = Math.max(0, Math.min(100, brightness));
+    setLed((current) => ({ ...current, brightness: nextBrightness, power: nextBrightness > 0 }));
+    void sendBrightness(nextBrightness);
+  }
+
+  async function updateMode(mode: LedMode) {
+    setLed((current) => ({ ...current, mode }));
+    setBridgeStatus("Sending...");
+
+    try {
+      const response = await fetch(modeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setBridgeStatus(`LED mode ${mode.toUpperCase()} sent`);
+    } catch (error) {
+      console.error("Arduino mode request failed", error);
+      setBridgeStatus("Bridge offline");
+    }
+  }
+
   return (
     <main className="remoteShell">
       <div className="ambientPane" aria-hidden="true" />
@@ -329,7 +372,7 @@ function App() {
               className={`modeButton ${led.mode === mode ? "active" : ""}`}
               key={mode}
               type="button"
-              onClick={() => setLed((current) => ({ ...current, mode }))}
+              onClick={() => void updateMode(mode)}
             >
               {mode.toUpperCase()}
             </button>
@@ -395,24 +438,18 @@ function App() {
               min="0"
               max="100"
               value={led.brightness}
-              onChange={(event) =>
-                setLed((current) => ({ ...current, brightness: Number(event.target.value) }))
-              }
+              onChange={(event) => updateBrightness(Number(event.target.value))}
             />
             <div className="stepRow">
               <button
                 type="button"
-                onClick={() =>
-                  setLed((current) => ({ ...current, brightness: Math.max(0, current.brightness - 10) }))
-                }
+                onClick={() => updateBrightness(led.brightness - 10)}
               >
                 -
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  setLed((current) => ({ ...current, brightness: Math.min(100, current.brightness + 10) }))
-                }
+                onClick={() => updateBrightness(led.brightness + 10)}
               >
                 +
               </button>
@@ -497,4 +534,8 @@ function DataColumn({ title, rows }: { title: string; rows: DataRow[] }) {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
