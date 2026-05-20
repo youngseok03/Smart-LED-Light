@@ -1,0 +1,11 @@
+{
+  "temperature": 24,
+  "humidity": 55,
+  "weather": "Rain",
+  "dust": "Bad",
+  "ledColor": "blue",
+  "brightness": 70,
+  "power": true,
+  "mode": "auto",
+  "message": "Take an umbrella"
+}
