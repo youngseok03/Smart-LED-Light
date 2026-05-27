@@ -1,22 +1,30 @@
 #include <Wire.h>
 #include <U8x8lib.h>
 #include <DHT.h>
+#include <Adafruit_NeoPixel.h>
 
 #define DHT_PIN 7
 #define DHT_TYPE DHT11
+#define PIR_PIN 2
 #define LDR_PIN A0
 #define LED_PIN 5
+#define LED_COUNT 24
 #define STATUS_LED_PIN LED_BUILTIN
 #define BUTTON_BRIGHTNESS_PIN 8
 #define BUTTON_MODE_PIN 9
 #define SERIAL_BAUD 9600
 #define DISPLAY_LINE_COUNT 4
+#define DISPLAY_PAGE_COUNT 3
 #define OLED_COLS 16
 #define BUTTON_DEBOUNCE_MS 45
 #define MODE_COUNT 4
+#define LDR_DARK_THRESHOLD 400
+#define SENSOR_DEBUG_INTERVAL_MS 1000
+#define DISPLAY_REFRESH_MS 1000
 
 DHT dht(DHT_PIN, DHT_TYPE);
 U8X8_SH1106_128X64_NONAME_HW_I2C oled(U8X8_PIN_NONE);
+Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 uint8_t hangulHanTop[] = {
   0x40, 0xA4, 0x15, 0x15, 0x17, 0x15, 0x15, 0xA4,
@@ -47,8 +55,8 @@ String displayLines[DISPLAY_LINE_COUNT] = {
 };
 
 unsigned long lastDisplay = 0;
+unsigned long lastSensorDebug = 0;
 int displayPage = 0;
-bool displayPower = true;
 bool ledPower = true;
 int ledBrightness = 70;
 bool lastBrightnessButtonReading = HIGH;
@@ -61,19 +69,29 @@ int colorModeIndex = 0;
 const char *colorModes[MODE_COUNT] = {"AUTO", "MANUAL", "REST", "STUDY"};
 
 void setup() {
-  Serial.begin(SERIAL_BAUD);
   Wire.begin();
-  dht.begin();
-  pinMode(LDR_PIN, INPUT);
-  pinMode(LED_PIN, OUTPUT);
-  pinMode(STATUS_LED_PIN, OUTPUT);
-  pinMode(BUTTON_BRIGHTNESS_PIN, INPUT_PULLUP);
-  pinMode(BUTTON_MODE_PIN, INPUT_PULLUP);
-  applyLedOutput();
-
   oled.begin();
   oled.setFont(u8x8_font_chroma48medium8_r);
   oled.setPowerSave(0);
+  oled.clearDisplay();
+  oled.drawString(0, 0, "SMART BOOT");
+  oled.drawString(0, 2, "OLED first");
+  oled.drawString(0, 4, "A4 SDA A5 SCL");
+  delay(1200);
+
+  Serial.begin(SERIAL_BAUD);
+  dht.begin();
+  pinMode(PIR_PIN, INPUT);
+  pinMode(LDR_PIN, INPUT);
+  pinMode(STATUS_LED_PIN, OUTPUT);
+  pinMode(BUTTON_BRIGHTNESS_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_MODE_PIN, INPUT_PULLUP);
+  digitalWrite(STATUS_LED_PIN, LOW);
+  strip.begin();
+  strip.clear();
+  strip.show();
+  applyLedOutput();
+
   showKoreanSplash();
   delay(1500);
   showBootScreen();
@@ -84,14 +102,13 @@ void setup() {
 void loop() {
   readSerialData();
   readButtonInputs();
+  updateMotionStatusLed();
+  printSensorDebug();
+  keepDisplayAwake();
 
-  if (!displayPower) {
-    return;
-  }
-
-  if (millis() - lastDisplay >= 2500) {
+  if (millis() - lastDisplay >= DISPLAY_REFRESH_MS) {
     lastDisplay = millis();
-    displayPage = (displayPage + 1) % 3;
+    displayPage = (displayPage + 1) % DISPLAY_PAGE_COUNT;
     displayCurrentPage();
   }
 }
@@ -173,16 +190,14 @@ void handleBrightnessCommand(String value) {
   ledPower = ledBrightness > 0;
   applyLedOutput();
 
-  if (displayPower) {
-    drawPage(
-      "Brightness",
-      "LED: " + String(ledBrightness) + "%",
-      ledPower ? "Power: ON" : "Power: OFF",
-      "PWM pin: D5",
-      ""
-    );
-    lastDisplay = 0;
-  }
+  drawPage(
+    "Brightness",
+    "LED: " + String(ledBrightness) + "%",
+    ledPower ? "Power: ON" : "Power: OFF",
+    "WS2812 DIN: D5",
+    ""
+  );
+  lastDisplay = 0;
 }
 
 void handleModeCommand(String mode) {
@@ -192,6 +207,7 @@ void handleModeCommand(String mode) {
   for (int index = 0; index < MODE_COUNT; index++) {
     if (mode == colorModes[index]) {
       colorModeIndex = index;
+      applyLedOutput();
       showModeStatus("Web mode");
       return;
     }
@@ -218,6 +234,7 @@ void readButtonInputs() {
 
   if (wasButtonPressed(BUTTON_MODE_PIN, lastModeButtonReading, stableModeButtonState, lastModeButtonChange)) {
     colorModeIndex = (colorModeIndex + 1) % MODE_COUNT;
+    applyLedOutput();
     showModeStatus("Button D9");
   }
 }
@@ -252,9 +269,62 @@ bool wasButtonPressed(uint8_t pin, bool &lastReading, bool &stableState, unsigne
 }
 
 void applyLedOutput() {
-  int pwmValue = ledPower ? map(ledBrightness, 0, 100, 0, 255) : 0;
-  analogWrite(LED_PIN, pwmValue);
-  digitalWrite(STATUS_LED_PIN, ledPower ? HIGH : LOW);
+  uint32_t color = ledPower ? currentStripColor() : strip.Color(0, 0, 0);
+
+  strip.setBrightness(ledPower ? map(ledBrightness, 0, 100, 0, 180) : 0);
+  for (int index = 0; index < LED_COUNT; index++) {
+    strip.setPixelColor(index, color);
+  }
+  strip.show();
+}
+
+uint32_t currentStripColor() {
+  if (colorModeIndex == 1) {
+    return strip.Color(255, 245, 220);
+  }
+  if (colorModeIndex == 2) {
+    return strip.Color(255, 120, 70);
+  }
+  if (colorModeIndex == 3) {
+    return strip.Color(180, 220, 255);
+  }
+  return strip.Color(200, 255, 220);
+}
+
+bool isRoomDark(int rawLight) {
+  return rawLight < LDR_DARK_THRESHOLD;
+}
+
+bool isPirMotionDetected() {
+  return digitalRead(PIR_PIN) == HIGH;
+}
+
+void updateMotionStatusLed() {
+  int rawLight = analogRead(LDR_PIN);
+  bool dark = isRoomDark(rawLight);
+  bool motion = isPirMotionDetected();
+  digitalWrite(STATUS_LED_PIN, dark && motion ? HIGH : LOW);
+}
+
+void printSensorDebug() {
+  if (millis() - lastSensorDebug < SENSOR_DEBUG_INTERVAL_MS) {
+    return;
+  }
+
+  lastSensorDebug = millis();
+  int rawLight = analogRead(LDR_PIN);
+  bool dark = isRoomDark(rawLight);
+  bool motion = isPirMotionDetected();
+  bool onboardLedOn = dark && motion;
+
+  Serial.print("DEBUG,LDR=");
+  Serial.print(rawLight);
+  Serial.print(",DARK=");
+  Serial.print(dark ? 1 : 0);
+  Serial.print(",PIR=");
+  Serial.print(motion ? 1 : 0);
+  Serial.print(",ONBOARD_LED=");
+  Serial.println(onboardLedOn ? 1 : 0);
 }
 
 void handleDisplayData(String payload) {
@@ -282,6 +352,10 @@ void handleDisplayData(String payload) {
 
 void showBootScreen() {
   drawPage("Smart LED", displayLines[0], displayLines[1], displayLines[2], displayLines[3]);
+}
+
+void keepDisplayAwake() {
+  oled.setPowerSave(0);
 }
 
 void showKoreanSplash() {
@@ -325,14 +399,16 @@ void displayDhtData() {
 void displayLightData() {
   int raw = analogRead(LDR_PIN);
   int percent = map(raw, 0, 1023, 0, 100);
-  String state = raw < 400 ? "Dark" : "Bright";
+  bool dark = isRoomDark(raw);
+  bool motion = isPirMotionDetected();
+  bool onboardLedOn = dark && motion;
 
   drawPage(
-    "Light Sensor",
-    "Raw: " + String(raw),
-    "Level: " + String(percent) + "%",
-    "State: " + state,
-    "AO -> A0"
+    "Light / PIR",
+    "Raw:" + String(raw) + " " + String(percent) + "%",
+    dark ? "Light: Dark" : "Light: Bright",
+    motion ? "PIR: Motion" : "PIR: No motion",
+    onboardLedOn ? "OnLED: ON" : "OnLED: OFF"
   );
 }
 
@@ -358,6 +434,7 @@ void drawText(uint8_t col, uint8_t row, String text) {
 }
 
 void drawPage(String title, String line1, String line2, String line3, String line4) {
+  oled.setPowerSave(0);
   oled.clearDisplay();
   drawText(0, 0, title);
   drawText(0, 1, "----------------");

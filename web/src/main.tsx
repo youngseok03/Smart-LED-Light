@@ -36,10 +36,11 @@ type DashboardData = {
     serial: string;
   };
   indoor: {
-    temperature: number;
-    humidity: number;
+    temperature: number | null;
+    humidity: number | null;
     airQuality: string;
     dust: string;
+    dustDensity?: number;
     motion: boolean;
     illuminance: number;
   };
@@ -70,6 +71,23 @@ type DashboardData = {
   };
 };
 
+type LiveSensorState = {
+  ldrRaw?: number;
+  dark?: boolean;
+  pirMotion?: boolean;
+  onboardLed?: boolean;
+  dustRaw?: number;
+  dustVoltage?: number;
+  dustDensity?: number;
+  updatedAt?: number;
+};
+
+type BridgeStateResponse = {
+  ok: boolean;
+  data?: DashboardData;
+  sensor?: LiveSensorState | null;
+};
+
 type ColorPreset = {
   name: string;
   rgb: [number, number, number];
@@ -84,9 +102,23 @@ const colorPresets: ColorPreset[] = [
 ];
 
 const modes: LedMode[] = ["auto", "manual", "rest", "study"];
-const bridgeUrl = "http://127.0.0.1:8765/power";
-const brightnessUrl = "http://127.0.0.1:8765/brightness";
-const modeUrl = "http://127.0.0.1:8765/mode";
+
+function resolveEsp32BaseUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const queryUrl = params.get("esp");
+  if (queryUrl) {
+    window.localStorage.setItem("smartLedEsp32Url", queryUrl);
+    return queryUrl.replace(/\/$/, "");
+  }
+
+  return (window.localStorage.getItem("smartLedEsp32Url") ?? "http://172.20.10.4").replace(/\/$/, "");
+}
+
+const esp32BaseUrl = resolveEsp32BaseUrl();
+const bridgeUrl = `${esp32BaseUrl}/power`;
+const brightnessUrl = `${esp32BaseUrl}/brightness`;
+const modeUrl = `${esp32BaseUrl}/mode`;
+const stateUrl = `${esp32BaseUrl}/state`;
 
 function rgbValue(rgb: [number, number, number]) {
   return `rgb(${rgb.join(", ")})`;
@@ -171,7 +203,8 @@ export default function App() {
   });
   const [footLightPower, setFootLightPower] = useState(false);
   const [wheelPoint, setWheelPoint] = useState({ x: 78, y: 50 });
-  const [bridgeStatus, setBridgeStatus] = useState("Bridge standby");
+  const [bridgeStatus, setBridgeStatus] = useState(`ESP32 ${esp32BaseUrl}`);
+  const [liveSensor, setLiveSensor] = useState<LiveSensorState | null>(null);
 
   useEffect(() => {
     async function loadDashboard() {
@@ -190,6 +223,34 @@ export default function App() {
     }
 
     loadDashboard();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadBridgeState() {
+      try {
+        const response = await fetch(stateUrl, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = (await response.json()) as BridgeStateResponse;
+        if (cancelled || !payload.ok || !payload.data) return;
+
+        setDashboard(payload.data);
+        setLiveSensor(payload.sensor ?? null);
+        setBridgeStatus(payload.sensor ? "ESP32 live sensors" : "ESP32 online, waiting sensors");
+      } catch {
+        if (!cancelled) {
+          setLiveSensor(null);
+        }
+      }
+    }
+
+    void loadBridgeState();
+    const intervalId = window.setInterval(loadBridgeState, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   const lampStyle = useMemo<React.CSSProperties>(
@@ -213,6 +274,10 @@ export default function App() {
   const lcd = dashboard?.lcd;
   const ai = dashboard?.ai;
   const device = dashboard?.device;
+  const dustValue =
+    indoor?.dustDensity === undefined ? "센서 대기" : `${indoor.dustDensity}ug / ${indoor.dust}`;
+  const illuminanceValue =
+    liveSensor?.ldrRaw === undefined ? `${indoor?.illuminance ?? "-"} lux` : `${liveSensor.ldrRaw} raw`;
 
   function selectWheelColor(event: React.PointerEvent<HTMLDivElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -253,10 +318,10 @@ export default function App() {
         body: JSON.stringify({ power: nextPower }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      setBridgeStatus(nextPower ? "Arduino ON sent" : "Arduino OFF sent");
+      setBridgeStatus(nextPower ? "ESP32 ON sent" : "ESP32 OFF sent");
     } catch (error) {
-      console.error("Arduino bridge request failed", error);
-      setBridgeStatus("Bridge offline");
+      console.error("ESP32 power request failed", error);
+      setBridgeStatus("ESP32 offline");
     }
   }
 
@@ -272,8 +337,8 @@ export default function App() {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       setBridgeStatus(`LED brightness ${brightness}% sent`);
     } catch (error) {
-      console.error("Arduino brightness request failed", error);
-      setBridgeStatus("Bridge offline");
+      console.error("ESP32 brightness request failed", error);
+      setBridgeStatus("ESP32 offline");
     }
   }
 
@@ -296,8 +361,8 @@ export default function App() {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       setBridgeStatus(`LED mode ${mode.toUpperCase()} sent`);
     } catch (error) {
-      console.error("Arduino mode request failed", error);
-      setBridgeStatus("Bridge offline");
+      console.error("ESP32 mode request failed", error);
+      setBridgeStatus("ESP32 offline");
     }
   }
 
@@ -338,7 +403,11 @@ export default function App() {
             <Stat icon={Thermometer} label="실내온도" value={`${indoor?.temperature ?? "--"}°C`} />
             <Stat icon={Droplets} label="실내습도" value={`${indoor?.humidity ?? "--"}%`} />
             <Stat icon={CloudRain} label="날씨" value={weather?.status ?? "--"} />
-            <Stat icon={Activity} label="실내미세먼지" value={indoor?.dust ?? "--"} />
+            <Stat
+              icon={Activity}
+              label="실내미세먼지"
+              value={dustValue}
+            />
           </div>
         </div>
 
@@ -480,7 +549,7 @@ export default function App() {
         <DataColumn
           title="Indoor Sensors"
           rows={[
-            ["조도", `${indoor?.illuminance ?? "-"} lux`, Lightbulb],
+            ["조도", illuminanceValue, Lightbulb],
             ["동작 감지", indoor?.motion ? "감지됨" : "대기 중", Radio],
             ["공기질", indoor?.airQuality ?? "-", Activity],
             ["Serial", device?.serial ?? "-", Wifi],

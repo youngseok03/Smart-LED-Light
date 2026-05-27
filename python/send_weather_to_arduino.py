@@ -102,6 +102,73 @@ def build_display_message(data):
     return "DATA," + "|".join(build_lcd_lines(data)) + "\n"
 
 
+def parse_debug_value(value):
+    if value in {"0", "1"}:
+        return value == "1"
+
+    try:
+        if "." in value:
+            return float(value)
+        return int(value)
+    except ValueError:
+        return value
+
+
+def parse_sensor_debug(line):
+    if not line.startswith("DEBUG,"):
+        return None
+
+    raw_values = {}
+    for part in line.split(",")[1:]:
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        raw_values[key] = parse_debug_value(value)
+
+    return {
+        "ldrRaw": raw_values.get("LDR"),
+        "dark": raw_values.get("DARK"),
+        "pirMotion": raw_values.get("PIR"),
+        "onboardLed": raw_values.get("ONBOARD_LED"),
+        "dustRaw": raw_values.get("DUST_RAW"),
+        "dustVoltage": raw_values.get("DUST_V"),
+        "dustDensity": raw_values.get("DUST_UG"),
+        "updatedAt": time.time(),
+    }
+
+
+def classify_dust(dust_density):
+    if dust_density is None:
+        return "Unknown"
+    if dust_density > 150:
+        return "Bad"
+    if dust_density > 80:
+        return "Normal"
+    return "Good"
+
+
+def apply_live_sensor_data(data, sensor, port):
+    if not sensor:
+        return data
+
+    device = data.setdefault("device", {})
+    indoor = data.setdefault("indoor", {})
+    dust_density = sensor.get("dustDensity")
+
+    device["connection"] = "live"
+    device["serial"] = port
+    if sensor.get("ldrRaw") is not None:
+        indoor["illuminance"] = sensor["ldrRaw"]
+    if sensor.get("pirMotion") is not None:
+        indoor["motion"] = sensor["pirMotion"]
+    if dust_density is not None:
+        indoor["dustDensity"] = dust_density
+        indoor["dust"] = classify_dust(dust_density)
+        indoor["airQuality"] = indoor["dust"]
+
+    return data
+
+
 def print_ports():
     ports = list(list_ports.comports())
     if not ports:
@@ -131,7 +198,11 @@ class ArduinoBridge:
         self.baud_rate = baud_rate
         self.dry_run = dry_run
         self.lock = threading.Lock()
+        self.state_lock = threading.Lock()
         self.serial = None
+        self.reader_stop = threading.Event()
+        self.reader_thread = None
+        self.latest_sensor = None
 
         if self.dry_run:
             print("Dry run: serial output will be printed only.")
@@ -139,6 +210,30 @@ class ArduinoBridge:
 
         self.serial = serial.Serial(port, baud_rate, timeout=2)
         time.sleep(2)
+        self.start_reader()
+
+    def start_reader(self):
+        if self.dry_run or not self.serial:
+            return
+
+        def read_loop():
+            while not self.reader_stop.is_set():
+                try:
+                    line = self.serial.readline().decode("utf-8", errors="replace").strip()
+                except Exception as error:
+                    if not self.reader_stop.is_set():
+                        print(f"serial read error: {error}")
+                    return
+
+                if line:
+                    print(f"arduino: {line}")
+                    sensor = parse_sensor_debug(line)
+                    if sensor:
+                        with self.state_lock:
+                            self.latest_sensor = sensor
+
+        self.reader_thread = threading.Thread(target=read_loop, daemon=True)
+        self.reader_thread.start()
 
     def send_line(self, message):
         with self.lock:
@@ -149,8 +244,17 @@ class ArduinoBridge:
             self.serial.flush()
 
     def close(self):
+        self.reader_stop.set()
         if self.serial:
             self.serial.close()
+        if self.reader_thread:
+            self.reader_thread.join(timeout=1)
+
+    def sensor_state(self):
+        with self.state_lock:
+            if not self.latest_sensor:
+                return None
+            return dict(self.latest_sensor)
 
 
 def send_once(port, data_file, dry_run, baud_rate):
@@ -216,7 +320,9 @@ def make_handler(bridge, data_file):
                 except Exception as error:
                     self._send_json(500, {"ok": False, "error": str(error)})
                     return
-                self._send_json(200, {"ok": True, "data": data, "lcdLines": build_lcd_lines(data)})
+                sensor = bridge.sensor_state()
+                data = apply_live_sensor_data(data, sensor, bridge.port)
+                self._send_json(200, {"ok": True, "data": data, "lcdLines": build_lcd_lines(data), "sensor": sensor})
                 return
 
             self._send_json(404, {"ok": False, "error": "not found"})
