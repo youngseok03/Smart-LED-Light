@@ -208,7 +208,28 @@ http://127.0.0.1:5174/?esp=http://172.20.10.4
 
 ## 8. Python bridge
 
-Python bridge는 Arduino Uno를 USB Serial로 제어할 때 쓰는 이전 구조입니다. 실행은 반드시 `uv`를 사용합니다.
+Python bridge는 보드를 USB Serial로 제어할 때 쓰는 구조입니다. Wi-Fi 없이 ESP32를 컴퓨터에 유선 연결해서 쓸 때도 이 bridge를 사용합니다. 실행은 반드시 `uv`를 사용합니다.
+
+ESP32 USB Serial 전용 스케치:
+
+```text
+arduino/esp32_usb_serial/smart_led_usb_serial/smart_led_usb_serial.ino
+```
+
+현재 연결 기준 핀:
+
+```text
+WS2812 DIN      -> ESP32 GPIO18
+DHT11 DATA/S    -> ESP32 GPIO4
+OLED SDA        -> ESP32 GPIO21
+OLED SCL        -> ESP32 GPIO22
+OLED VCC        -> Breadboard 3.3V rail
+DHT11 VCC/+     -> Breadboard 3.3V rail
+WS2812 5V       -> Breadboard 5.5V rail
+All GND         -> Breadboard GND rail + ESP32 GND
+```
+
+USB Serial 스케치는 Wi-Fi를 쓰지 않습니다. ESP32를 컴퓨터에 USB로 연결한 상태에서 Python bridge가 Serial 명령을 보내고, 웹은 Python bridge 주소로 요청을 보냅니다.
 
 포트 확인:
 
@@ -216,10 +237,24 @@ Python bridge는 Arduino Uno를 USB Serial로 제어할 때 쓰는 이전 구조
 uv run python/send_weather_to_arduino.py --list-ports
 ```
 
-Arduino Uno bridge 실행:
+USB bridge 실행:
 
 ```bash
 uv run python/send_weather_to_arduino.py --port /dev/cu.usbmodem112301
+```
+
+웹 서버:
+
+```bash
+cd web
+npm install
+npm run dev -- --host 127.0.0.1 --port 5174
+```
+
+브라우저는 Python bridge를 보도록 엽니다.
+
+```text
+http://127.0.0.1:5174/?esp=http://127.0.0.1:8765
 ```
 
 하드웨어 없이 메시지만 확인:
@@ -248,4 +283,10 @@ Arduino Uno 통합 스케치:
 
 ```text
 arduino/smart_led_light/smart_led_light.ino
+```
+
+ESP32 USB Serial 통합 스케치:
+
+```text
+arduino/esp32_usb_serial/smart_led_usb_serial/smart_led_usb_serial.ino
 ```

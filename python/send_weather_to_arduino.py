@@ -103,6 +103,9 @@ def build_display_message(data):
 
 
 def parse_debug_value(value):
+    if value == "null":
+        return None
+
     if value in {"0", "1"}:
         return value == "1"
 
@@ -130,6 +133,11 @@ def parse_sensor_debug(line):
         "dark": raw_values.get("DARK"),
         "pirMotion": raw_values.get("PIR"),
         "onboardLed": raw_values.get("ONBOARD_LED"),
+        "temperature": raw_values.get("TEMP"),
+        "humidity": raw_values.get("HUM"),
+        "ledPower": raw_values.get("LED_POWER"),
+        "brightness": raw_values.get("BRIGHT"),
+        "mode": raw_values.get("MODE"),
         "dustRaw": raw_values.get("DUST_RAW"),
         "dustVoltage": raw_values.get("DUST_V"),
         "dustDensity": raw_values.get("DUST_UG"),
@@ -161,10 +169,23 @@ def apply_live_sensor_data(data, sensor, port):
         indoor["illuminance"] = sensor["ldrRaw"]
     if sensor.get("pirMotion") is not None:
         indoor["motion"] = sensor["pirMotion"]
+    if sensor.get("temperature") is not None:
+        indoor["temperature"] = sensor["temperature"]
+    if sensor.get("humidity") is not None:
+        indoor["humidity"] = sensor["humidity"]
     if dust_density is not None:
         indoor["dustDensity"] = dust_density
         indoor["dust"] = classify_dust(dust_density)
         indoor["airQuality"] = indoor["dust"]
+
+    led = data.setdefault("led", {})
+    if sensor.get("ledPower") is not None:
+        led["power"] = sensor["ledPower"]
+    if sensor.get("brightness") is not None:
+        led["brightness"] = sensor["brightness"]
+    if sensor.get("mode") is not None:
+        led["mode"] = str(sensor["mode"]).lower()
+        led["colorName"] = str(sensor["mode"])
 
     return data
 
@@ -394,12 +415,12 @@ def resolve_port(port, dry_run):
         return detected
     if dry_run:
         return "dry-run"
-    raise RuntimeError("No Arduino Uno serial port found. Run with --list-ports and pass --port.")
+    raise RuntimeError("No Arduino/ESP32 serial port found. Run with --list-ports and pass --port.")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Send dummy dashboard JSON and web ON/OFF commands to Arduino Uno over USB serial."
+        description="Send dashboard JSON and web ON/OFF commands to Arduino/ESP32 over USB serial."
     )
     parser.add_argument("--port", default="auto", help="Arduino Uno serial port, or auto")
     parser.add_argument("--baud", type=int, default=BAUD_RATE, help="serial baud rate")
