@@ -10,12 +10,14 @@
 #define OLED_SCL_PIN 22
 #define DHT_PIN 4
 #define DHT_TYPE DHT11
-#define WS2812_PIN 18
-#define WS2812_COUNT 30
-#define DUST_ADC_PIN 34
-#define DUST_LED_PIN 26
-#define BUTTON_BRIGHTNESS_PIN 32
-#define BUTTON_MODE_PIN 33
+#define RING_PIN 18
+#define RING_COUNT 24
+#define LED_BAR_PIN 19
+#define LED_BAR_COUNT 30
+#define DUST_ADC_PIN 35
+#define DUST_LED_PIN 23
+#define BUTTON_BRIGHTNESS_PIN 26
+#define BUTTON_MODE_PIN 25
 
 #define SENSOR_INTERVAL_MS 2000
 #define DUST_INTERVAL_MS 1000
@@ -23,13 +25,16 @@
 #define WIFI_CONNECT_TIMEOUT_MS 12000
 #define BUTTON_DEBOUNCE_MS 45
 #define BRIGHTNESS_STEP_COUNT 6
+#define DUST_LED_ACTIVE_HIGH true
+#define DEFAULT_BRIGHTNESS 40
 
 const char *apSSID = "ESP32-Setup";
 
 WebServer server(80);
 U8X8_SH1106_128X64_NONAME_HW_I2C oled(U8X8_PIN_NONE);
 DHT dht(DHT_PIN, DHT_TYPE);
-Adafruit_NeoPixel strip(WS2812_COUNT, WS2812_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel ring(RING_COUNT, RING_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel ledBar(LED_BAR_COUNT, LED_BAR_PIN, NEO_GRB + NEO_KHZ800);
 Preferences preferences;
 
 String scanResultsHTML = "";
@@ -37,9 +42,12 @@ String activeMode = "AUTO";
 const String modes[] = {"AUTO", "MANUAL", "REST", "STUDY"};
 const uint8_t brightnessSteps[BRIGHTNESS_STEP_COUNT] = {0, 20, 40, 60, 80, 100};
 bool ledPower = true;
-int ledBrightness = 40;
+int ledBrightness = DEFAULT_BRIGHTNESS;
 int modeIndex = 0;
 int brightnessIndex = 2;
+int manualRed = 255;
+int manualGreen = 245;
+int manualBlue = 220;
 float temperature = NAN;
 float humidity = NAN;
 int dustRaw = 0;
@@ -221,6 +229,10 @@ void handlePower() {
   String power = requestValue("power");
   power.toLowerCase();
   ledPower = power != "off" && power != "false" && power != "0";
+  if (ledPower && ledBrightness == 0) {
+    ledBrightness = DEFAULT_BRIGHTNESS;
+    syncBrightnessIndex();
+  }
   applyLedOutput();
   sendOkJson();
 }
@@ -244,9 +256,42 @@ void handleMode() {
   sendOkJson();
 }
 
+void handleColor() {
+  int red = manualRed;
+  int green = manualGreen;
+  int blue = manualBlue;
+
+  if (!parseRgbRequest(red, green, blue)) {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    server.send(400, "application/json", "{\"ok\":false,\"error\":\"expected rgb array or r,g,b values\"}");
+    return;
+  }
+
+  manualRed = constrain(red, 0, 255);
+  manualGreen = constrain(green, 0, 255);
+  manualBlue = constrain(blue, 0, 255);
+  activeMode = "MANUAL";
+  syncModeIndex();
+  ledPower = ledBrightness > 0;
+  applyLedOutput();
+
+  String json = "{\"ok\":true,\"mode\":\"MANUAL\",\"rgb\":[";
+  json += String(manualRed) + "," + String(manualGreen) + "," + String(manualBlue) + "]}";
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+  server.send(200, "application/json", json);
+}
+
 void handleState() {
   String temperatureJson = jsonNumber(temperature);
   String humidityJson = jsonNumber(humidity);
+  int red;
+  int green;
+  int blue;
+  currentLedRgb(red, green, blue);
   String json = "{";
   json += "\"ok\":true,";
   json += "\"data\":{";
@@ -261,8 +306,8 @@ void handleState() {
   json += "\"illuminance\":0";
   json += "},";
   json += "\"weather\":{\"status\":\"WiFi\",\"sky\":\"-\",\"rainType\":\"-\",\"rainfall\":0,\"wind\":0,\"outsideTemperature\":0},";
-  json += "\"led\":{\"power\":" + String(ledPower ? "true" : "false") + ",\"mode\":\"" + activeModeLower() + "\",\"rgb\":[200,255,220],\"colorName\":\"" + activeMode + "\",\"brightness\":" + String(ledBrightness) + "},";
-  json += "\"footLight\":{\"power\":false,\"auto\":false,\"trigger\":\"ESP32 direct\",\"timeoutSeconds\":0},";
+  json += "\"led\":{\"power\":" + String(ledPower ? "true" : "false") + ",\"mode\":\"" + activeModeLower() + "\",\"rgb\":[" + String(red) + "," + String(green) + "," + String(blue) + "],\"colorName\":\"" + activeMode + "\",\"brightness\":" + String(ledBrightness) + "},";
+  json += "\"footLight\":{\"power\":" + String(ledPower ? "true" : "false") + ",\"auto\":false,\"trigger\":\"D19 mirrors main LED\",\"timeoutSeconds\":0},";
   json += "\"lcd\":{\"line1\":\"" + String(ledPower ? "LED ON " : "LED OFF ") + String(ledBrightness) + "%\",\"line2\":\"T:" + dhtValueText(temperature) + " H:" + dhtValueText(humidity) + "\",\"message\":\"ESP32 live\"},";
   json += "\"ai\":{\"provider\":\"esp32\",\"message\":\"ESP32 live\",\"reason\":\"sensor state from ESP32\"}";
   json += "},";
@@ -326,6 +371,34 @@ String requestValue(String key) {
   String value = body.substring(start, end);
   value.trim();
   return value;
+}
+
+bool parseRgbRequest(int &red, int &green, int &blue) {
+  if (server.hasArg("r") && server.hasArg("g") && server.hasArg("b")) {
+    red = server.arg("r").toInt();
+    green = server.arg("g").toInt();
+    blue = server.arg("b").toInt();
+    return true;
+  }
+
+  String body = server.arg("plain");
+  int arrayStart = body.indexOf('[');
+  int arrayEnd = body.indexOf(']', arrayStart + 1);
+  if (arrayStart < 0 || arrayEnd < 0) {
+    return false;
+  }
+
+  String values = body.substring(arrayStart + 1, arrayEnd);
+  int firstComma = values.indexOf(',');
+  int secondComma = values.indexOf(',', firstComma + 1);
+  if (firstComma < 0 || secondComma < 0) {
+    return false;
+  }
+
+  red = values.substring(0, firstComma).toInt();
+  green = values.substring(firstComma + 1, secondComma).toInt();
+  blue = values.substring(secondComma + 1).toInt();
+  return true;
 }
 
 String jsonNumber(float value) {
@@ -413,12 +486,15 @@ void setupHardware() {
   pinMode(BUTTON_BRIGHTNESS_PIN, INPUT_PULLUP);
   pinMode(BUTTON_MODE_PIN, INPUT_PULLUP);
   pinMode(DUST_LED_PIN, OUTPUT);
-  digitalWrite(DUST_LED_PIN, HIGH);
+  setDustLed(false);
   analogSetPinAttenuation(DUST_ADC_PIN, ADC_11db);
 
-  strip.begin();
-  strip.clear();
-  strip.show();
+  ring.begin();
+  ledBar.begin();
+  ring.clear();
+  ledBar.clear();
+  ring.show();
+  ledBar.show();
   applyLedOutput();
 }
 
@@ -434,6 +510,8 @@ void setupRoutes() {
   server.on("/brightness", HTTP_OPTIONS, handleOptions);
   server.on("/mode", HTTP_POST, handleMode);
   server.on("/mode", HTTP_OPTIONS, handleOptions);
+  server.on("/color", HTTP_POST, handleColor);
+  server.on("/color", HTTP_OPTIONS, handleOptions);
   server.on("/state", HTTP_GET, handleState);
   server.on("/state", HTTP_OPTIONS, handleOptions);
   server.begin();
@@ -538,12 +616,12 @@ void readSensors() {
 }
 
 void readDustSensor() {
-  digitalWrite(DUST_LED_PIN, LOW);
+  setDustLed(true);
   delayMicroseconds(280);
   dustRaw = analogRead(DUST_ADC_PIN);
   uint32_t pinMilliVolts = analogReadMilliVolts(DUST_ADC_PIN);
   delayMicroseconds(40);
-  digitalWrite(DUST_LED_PIN, HIGH);
+  setDustLed(false);
   delayMicroseconds(9680);
 
   dustPinVoltage = pinMilliVolts / 1000.0;
@@ -556,6 +634,10 @@ void readDustSensor() {
     density = 500;
   }
   dustUg = (int)density;
+}
+
+void setDustLed(bool on) {
+  digitalWrite(DUST_LED_PIN, on == DUST_LED_ACTIVE_HIGH ? HIGH : LOW);
 }
 
 void updateOled() {
@@ -595,25 +677,51 @@ String fitOled(String text) {
 }
 
 void applyLedOutput() {
-  uint32_t color = ledPower ? currentLedColor() : strip.Color(0, 0, 0);
-  strip.setBrightness(ledPower ? map(ledBrightness, 0, 100, 0, 180) : 0);
+  uint32_t color = ledPower ? currentLedColor() : ring.Color(0, 0, 0);
+  uint8_t pixelBrightness = ledPower ? map(ledBrightness, 0, 100, 0, 180) : 0;
 
-  for (int index = 0; index < WS2812_COUNT; index++) {
-    strip.setPixelColor(index, color);
+  ring.setBrightness(pixelBrightness);
+  ledBar.setBrightness(pixelBrightness);
+
+  for (int index = 0; index < RING_COUNT; index++) {
+    ring.setPixelColor(index, color);
+  }
+  for (int index = 0; index < LED_BAR_COUNT; index++) {
+    ledBar.setPixelColor(index, color);
   }
 
-  strip.show();
+  ring.show();
+  ledBar.show();
 }
 
 uint32_t currentLedColor() {
+  int red;
+  int green;
+  int blue;
+  currentLedRgb(red, green, blue);
+  return ring.Color(red, green, blue);
+}
+
+void currentLedRgb(int &red, int &green, int &blue) {
   if (activeMode == "MANUAL") {
-    return strip.Color(255, 245, 220);
+    red = manualRed;
+    green = manualGreen;
+    blue = manualBlue;
+    return;
   }
   if (activeMode == "REST") {
-    return strip.Color(255, 120, 70);
+    red = 255;
+    green = 120;
+    blue = 70;
+    return;
   }
   if (activeMode == "STUDY") {
-    return strip.Color(180, 220, 255);
+    red = 180;
+    green = 220;
+    blue = 255;
+    return;
   }
-  return strip.Color(200, 255, 220);
+  red = 200;
+  green = 255;
+  blue = 220;
 }
