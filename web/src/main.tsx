@@ -118,6 +118,7 @@ const esp32BaseUrl = resolveEsp32BaseUrl();
 const bridgeUrl = `${esp32BaseUrl}/power`;
 const brightnessUrl = `${esp32BaseUrl}/brightness`;
 const modeUrl = `${esp32BaseUrl}/mode`;
+const colorUrl = `${esp32BaseUrl}/color`;
 const stateUrl = `${esp32BaseUrl}/state`;
 
 function rgbValue(rgb: [number, number, number]) {
@@ -279,7 +280,7 @@ export default function App() {
   const illuminanceValue =
     liveSensor?.ldrRaw === undefined ? `${indoor?.illuminance ?? "-"} lux` : `${liveSensor.ldrRaw} raw`;
 
-  function selectWheelColor(event: React.PointerEvent<HTMLDivElement>) {
+  function selectWheelColor(event: React.PointerEvent<HTMLDivElement>, shouldSend = false) {
     const rect = event.currentTarget.getBoundingClientRect();
     const radius = rect.width / 2;
     const x = event.clientX - rect.left;
@@ -304,6 +305,33 @@ export default function App() {
       colorName: "사용자 색상",
       mode: "manual",
     }));
+    if (shouldSend) {
+      void sendManualColor(selectedRgb, "사용자 색상");
+    }
+  }
+
+  async function sendManualColor(rgb: [number, number, number], colorName: string) {
+    setBridgeStatus("Sending...");
+
+    try {
+      const response = await fetch(colorUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rgb }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setBridgeStatus(`Manual color ${rgb.join(",")} sent`);
+      setLed((current) => ({
+        ...current,
+        rgb,
+        colorName,
+        mode: "manual",
+        power: current.brightness > 0,
+      }));
+    } catch (error) {
+      console.error("ESP32 color request failed", error);
+      setBridgeStatus("ESP32 offline");
+    }
   }
 
   async function togglePower() {
@@ -460,17 +488,10 @@ export default function App() {
                     style={{ "--swatch": rgbValue(preset.rgb) } as React.CSSProperties}
                     type="button"
                     aria-label={preset.name}
-                    onClick={() =>
-                      {
-                        setWheelPoint(wheelPointFromRgb(preset.rgb));
-                        setLed((current) => ({
-                          ...current,
-                          rgb: preset.rgb,
-                          colorName: preset.name,
-                          mode: "manual",
-                        }));
-                      }
-                    }
+                    onClick={() => {
+                      setWheelPoint(wheelPointFromRgb(preset.rgb));
+                      void sendManualColor(preset.rgb, preset.name);
+                    }}
                   />
                 ))}
               </div>
@@ -494,6 +515,7 @@ export default function App() {
                 onPointerMove={(event) => {
                   if (event.buttons === 1) selectWheelColor(event);
                 }}
+                onPointerUp={(event) => selectWheelColor(event, true)}
               >
                 <span />
               </div>

@@ -53,6 +53,12 @@ def parse_mode(value):
     return mode
 
 
+def parse_rgb(value):
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError("expected rgb to be a three-number list")
+    return [max(0, min(255, int(channel))) for channel in value]
+
+
 def load_dashboard_data(data_file):
     with Path(data_file).open("r", encoding="utf-8") as file:
         return json.load(file)
@@ -82,6 +88,10 @@ def get_ai_message(data):
     return ai_message or lcd_message or fallback_ai_message(data)
 
 
+def display_value(value, fallback="-"):
+    return fallback if value is None else value
+
+
 def build_lcd_lines(data):
     indoor = data.get("indoor", {})
     weather = data.get("weather", {})
@@ -92,7 +102,7 @@ def build_lcd_lines(data):
     brightness = led.get("brightness", 0)
     line1 = f"LED {power_text} {brightness}%"
     line2 = f"W:{weather.get('status', '-')} {weather.get('outsideTemperature', '-')}C"
-    line3 = f"In:{indoor.get('temperature', '-')}C H{indoor.get('humidity', '-')}%"
+    line3 = f"In:{display_value(indoor.get('temperature'))}C H{display_value(indoor.get('humidity'))}%"
     line4 = ai_message
 
     return [sanitize_display_text(line) for line in (line1, line2, line3, line4)]
@@ -102,11 +112,11 @@ def build_display_message(data):
     return "DATA," + "|".join(build_lcd_lines(data)) + "\n"
 
 
-def parse_debug_value(value):
+def parse_debug_value(value, boolean=False):
     if value == "null":
         return None
 
-    if value in {"0", "1"}:
+    if boolean and value in {"0", "1"}:
         return value == "1"
 
     try:
@@ -126,23 +136,30 @@ def parse_sensor_debug(line):
         if "=" not in part:
             continue
         key, value = part.split("=", 1)
-        raw_values[key] = parse_debug_value(value)
+        raw_values[key] = parse_debug_value(value, key in {"DARK", "PIR", "ONBOARD_LED", "LED_POWER"})
 
-    return {
-        "ldrRaw": raw_values.get("LDR"),
-        "dark": raw_values.get("DARK"),
-        "pirMotion": raw_values.get("PIR"),
-        "onboardLed": raw_values.get("ONBOARD_LED"),
-        "temperature": raw_values.get("TEMP"),
-        "humidity": raw_values.get("HUM"),
-        "ledPower": raw_values.get("LED_POWER"),
-        "brightness": raw_values.get("BRIGHT"),
-        "mode": raw_values.get("MODE"),
-        "dustRaw": raw_values.get("DUST_RAW"),
-        "dustVoltage": raw_values.get("DUST_V"),
-        "dustDensity": raw_values.get("DUST_UG"),
-        "updatedAt": time.time(),
+    sensor = {"updatedAt": time.time()}
+    field_map = {
+        "LDR": "ldrRaw",
+        "DARK": "dark",
+        "PIR": "pirMotion",
+        "ONBOARD_LED": "onboardLed",
+        "TEMP": "temperature",
+        "HUM": "humidity",
+        "LED_POWER": "ledPower",
+        "BRIGHT": "brightness",
+        "MODE": "mode",
+        "RGB": "rgb",
+        "DUST_RAW": "dustRaw",
+        "DUST_V": "dustVoltage",
+        "DUST_UG": "dustDensity",
     }
+
+    for raw_key, sensor_key in field_map.items():
+        if raw_key in raw_values:
+            sensor[sensor_key] = raw_values[raw_key]
+
+    return sensor
 
 
 def classify_dust(dust_density):
@@ -169,9 +186,9 @@ def apply_live_sensor_data(data, sensor, port):
         indoor["illuminance"] = sensor["ldrRaw"]
     if sensor.get("pirMotion") is not None:
         indoor["motion"] = sensor["pirMotion"]
-    if sensor.get("temperature") is not None:
+    if "temperature" in sensor:
         indoor["temperature"] = sensor["temperature"]
-    if sensor.get("humidity") is not None:
+    if "humidity" in sensor:
         indoor["humidity"] = sensor["humidity"]
     if dust_density is not None:
         indoor["dustDensity"] = dust_density
@@ -184,8 +201,23 @@ def apply_live_sensor_data(data, sensor, port):
     if sensor.get("brightness") is not None:
         led["brightness"] = sensor["brightness"]
     if sensor.get("mode") is not None:
-        led["mode"] = str(sensor["mode"]).lower()
+        mode = str(sensor["mode"]).lower()
+        led["mode"] = mode
         led["colorName"] = str(sensor["mode"])
+        mode_rgb = {
+            "auto": [200, 255, 220],
+            "manual": led.get("rgb", [255, 245, 220]),
+            "rest": [255, 120, 70],
+            "study": [180, 220, 255],
+        }
+        led["rgb"] = mode_rgb.get(mode, led.get("rgb", [200, 255, 220]))
+    if sensor.get("rgb") is not None:
+        try:
+            manual_rgb = [int(channel) for channel in str(sensor["rgb"]).split("-")]
+            if led.get("mode") == "manual":
+                led["rgb"] = manual_rgb
+        except ValueError:
+            pass
 
     return data
 
@@ -349,7 +381,7 @@ def make_handler(bridge, data_file):
             self._send_json(404, {"ok": False, "error": "not found"})
 
         def do_POST(self):
-            if self.path not in {"/lcd", "/power", "/brightness", "/mode"}:
+            if self.path not in {"/lcd", "/power", "/brightness", "/mode", "/color"}:
                 self._send_json(404, {"ok": False, "error": "not found"})
                 return
 
@@ -362,6 +394,10 @@ def make_handler(bridge, data_file):
                     brightness = parse_percent(payload["brightness"])
                     command = f"CMD,BRIGHT,{brightness}\n"
                     response_payload = {"ok": True, "brightness": brightness, "sent": command.strip()}
+                elif self.path == "/color":
+                    red, green, blue = parse_rgb(payload["rgb"])
+                    command = f"CMD,COLOR,{red},{green},{blue}\n"
+                    response_payload = {"ok": True, "rgb": [red, green, blue], "mode": "MANUAL", "sent": command.strip()}
                 elif self.path == "/mode":
                     mode = parse_mode(payload["mode"])
                     command = f"CMD,MODE,{mode}\n"

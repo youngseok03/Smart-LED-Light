@@ -4,6 +4,50 @@
 
 ESP32 통합 회로와 브레드보드 전원 모듈 배선은 프로젝트 루트의 `README.md`를 기준으로 봅니다. 현재 ESP32 통합 회로는 브레드보드 `3.3V` 레일을 OLED/DHT11에, `5.5V` 레일을 WS2812/GP2Y1014AU에 쓰고, 모든 GND를 공통으로 묶습니다.
 
+## ESP32 GP2Y1014AU Dust Sensor
+
+폴더:
+
+```text
+arduino/sensor_tests/ESP32_GP2Y1014AU_Dust_Test/ESP32_GP2Y1014AU_Dust_Test.ino
+```
+
+현재 통합 코드와 같은 핀 기준입니다.
+
+```text
+GP2Y Vo/AO    -> ESP32 GPIO35
+GP2Y LED      -> ESP32 GPIO27
+GP2Y VCC      -> 5V rail
+GP2Y S-GND    -> GND rail
+GP2Y V-LED    -> 150 ohm resistor -> 5V rail
+GP2Y LED-GND  -> GND rail
+220uF +       -> GP2Y V-LED
+220uF -       -> GND rail
+```
+
+Serial Monitor baud rate는 `115200`입니다. `raw`, `adc_v`, `voltage_over_clean`, `dust_ugm3`가 1초마다 출력됩니다.
+
+## Arduino Uno GP2Y1014AU Dust Sensor
+
+폴더:
+
+```text
+arduino/sensor_tests/Uno_GP2Y1014AU_Dust_Test/Uno_GP2Y1014AU_Dust_Test.ino
+```
+
+```text
+GP2Y Vo/AO    -> Arduino A0
+GP2Y LED      -> Arduino D7
+GP2Y VCC      -> Arduino 5V
+GP2Y S-GND    -> Arduino GND
+GP2Y V-LED    -> 150 ohm resistor -> Arduino 5V
+GP2Y LED-GND  -> Arduino GND
+220uF +       -> GP2Y V-LED
+220uF -       -> Arduino GND
+```
+
+Serial Monitor baud rate는 `9600`입니다. GP2Y1014AU 기준 no-dust 전압은 우선 `0.6V`로 계산합니다. 깨끗한 공기에서 `A0_voltage` 평균이 다르면 코드의 `CLEAN_AIR_VOLTAGE` 값을 그 평균에 맞춰 보정합니다.
+
 ## LDR Light Sensor
 
 폴더:
