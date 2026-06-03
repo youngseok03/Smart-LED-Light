@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>눈오는날 LED 테스트</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f8fb;
+      color: #162536;
+    }
+    main {
+      width: min(92vw, 420px);
+      padding: 24px;
+      border-radius: 14px;
+      background: white;
+      box-shadow: 0 18px 44px rgba(77, 99, 128, 0.14);
+    }
+    h1 { margin: 0 0 8px; font-size: 26px; }
+    p { color: #607086; line-height: 1.55; }
+    button {
+      width: 100%;
+      margin-top: 18px;
+      padding: 14px 16px;
+      border: 0;
+      border-radius: 10px;
+      background: #8aa6c6;
+      color: white;
+      font-size: 17px;
+      font-weight: 800;
+    }
+    .swatch {
+      width: 92px;
+      height: 92px;
+      border-radius: 50%;
+      margin: 22px auto;
+      background: rgb(245, 250, 255);
+      box-shadow: 0 0 36px rgba(180, 215, 255, 0.82);
+      border: 1px solid #dbe7f3;
+    }
+    .status {
+      min-height: 42px;
+      padding: 12px;
+      border-radius: 10px;
+      background: #f2f6fb;
+      color: #334155;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>눈오는날 테스트</h1>
+    <p>하드코딩 날씨값을 ESP32에 보내고 LED를 흰색으로 바꿉니다.</p>
+    <div class="swatch" aria-label="흰색 LED 미리보기"></div>
+    <div id="status" class="status">대기 중</div>
+    <button id="run">눈오는날 값 보내기</button>
+    <button id="auto" type="button">AUTO 모드로 복귀</button>
+  </main>
+  <script>
+    const esp = new URLSearchParams(location.search).get("esp")
+      || localStorage.getItem("smartLedEsp32Url")
+      || "http://192.168.219.196";
+    localStorage.setItem("smartLedEsp32Url", esp);
+
+    const weather = {
+      status: "눈",
+      sky: "흐림",
+      rainType: "눈",
+      feedback: "Snow -2C",
+      outsideTemperature: -2,
+      rainfall: 1,
+      wind: 2.5
+    };
+    const rgb = [245, 250, 255];
+    const mainUrl = `/?esp=${encodeURIComponent(esp)}&weatherTest=snow`;
+
+    const statusEl = document.getElementById("status");
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+    async function post(path, body) {
+      const response = await fetch(`${esp}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) throw new Error(`${path} HTTP ${response.status}`);
+    }
+    async function postWeatherTest(body) {
+      const response = await fetch("/api/weather-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) throw new Error(`/api/weather-test HTTP ${response.status}`);
+    }
+    async function clearWeatherTest() {
+      const response = await fetch("/api/weather-test", { method: "DELETE" });
+      if (!response.ok) throw new Error(`/api/weather-test HTTP ${response.status}`);
+    }
+    async function runTest() {
+      setStatus(`전송 중...\nESP32: ${esp}`);
+      localStorage.setItem("smartLedWeatherOverride", JSON.stringify(weather));
+      window.dispatchEvent(new Event("smart-led-weather-override"));
+      await postWeatherTest(weather);
+      await post("/power", { power: "on" });
+      await post("/brightness", { brightness: 80 });
+      await post("/weather", weather);
+      await post("/color", { rgb });
+      setStatus("완료: 눈오는날 / 흰색 LED\n메인 웹으로 이동합니다.");
+      window.setTimeout(() => {
+        window.location.href = mainUrl;
+      }, 500);
+    }
+    async function restoreAuto() {
+      setStatus("AUTO 모드 복귀 중...");
+      localStorage.removeItem("smartLedWeatherOverride");
+      window.dispatchEvent(new Event("smart-led-weather-override"));
+      await clearWeatherTest();
+      await post("/mode", { mode: "AUTO" });
+      setStatus("완료: AUTO 모드\n메인 웹으로 이동합니다.");
+      window.setTimeout(() => {
+        window.location.href = `/?esp=${encodeURIComponent(esp)}&weatherTest=off`;
+      }, 500);
+    }
+    document.getElementById("run").addEventListener("click", () => runTest().catch((error) => setStatus(error.message)));
+    document.getElementById("auto").addEventListener("click", () => restoreAuto().catch((error) => setStatus(error.message)));
+  </script>
+</body>
+</html>

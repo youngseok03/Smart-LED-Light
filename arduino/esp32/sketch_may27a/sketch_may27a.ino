@@ -21,14 +21,37 @@
 
 #define SENSOR_INTERVAL_MS 2000
 #define DUST_INTERVAL_MS 1000
-#define OLED_INTERVAL_MS 1500
+#define OLED_INTERVAL_MS 5000
 #define WIFI_CONNECT_TIMEOUT_MS 12000
 #define BUTTON_DEBOUNCE_MS 45
 #define BRIGHTNESS_STEP_COUNT 6
-#define DUST_LED_ACTIVE_HIGH true
+#define DUST_LED_ACTIVE_HIGH false
 #define DEFAULT_BRIGHTNESS 40
+#define DUST_BASELINE_DENSITY 584.1
+#define DUST_BASELINE_OUTPUT 20.0
+#define DUST_CAL_SCALE 1.0
+#define AUTO_RAINBOW_INTERVAL_MS 900
+#define AUTO_RAINBOW_COUNT 7
 
 const char *apSSID = "ESP32-Setup";
+const uint8_t autoRainbowColors[AUTO_RAINBOW_COUNT][3] = {
+  {255, 0, 0},
+  {255, 80, 0},
+  {255, 220, 0},
+  {0, 200, 70},
+  {0, 120, 255},
+  {60, 0, 255},
+  {180, 0, 255}
+};
+const char *autoRainbowNames[AUTO_RAINBOW_COUNT] = {
+  "Red",
+  "Orange",
+  "Yellow",
+  "Green",
+  "Blue",
+  "Indigo",
+  "Violet"
+};
 
 WebServer server(80);
 U8X8_SH1106_128X64_NONAME_HW_I2C oled(U8X8_PIN_NONE);
@@ -54,10 +77,17 @@ int dustRaw = 0;
 float dustPinVoltage = 0;
 float dustSensorVoltage = 0;
 int dustUg = 0;
+String weatherStatus = "No weather";
+String weatherFeedback = "Weather wait";
+float weatherOutsideTemperature = NAN;
+float weatherRainfall = 0;
+float weatherWind = 0;
 unsigned long lastSensorRead = 0;
 unsigned long lastDustRead = 0;
 unsigned long lastOledUpdate = 0;
+unsigned long lastAutoRainbowUpdate = 0;
 int oledPage = 0;
+uint8_t autoRainbowIndex = 0;
 bool lastBrightnessButtonReading = HIGH;
 bool stableBrightnessButtonState = HIGH;
 unsigned long lastBrightnessButtonChange = 0;
@@ -285,9 +315,36 @@ void handleColor() {
   server.send(200, "application/json", json);
 }
 
+void handleWeather() {
+  String status = requestValue("status");
+  String feedback = requestValue("feedback");
+  String outsideTemperature = requestValue("outsideTemperature");
+  String rainfall = requestValue("rainfall");
+  String wind = requestValue("wind");
+
+  if (feedback.length() == 0) {
+    feedback = status.length() == 0 ? "Weather ok" : status;
+  }
+
+  weatherStatus = status.length() == 0 ? feedback : status;
+  weatherFeedback = feedback;
+  if (outsideTemperature.length() > 0) {
+    weatherOutsideTemperature = outsideTemperature.toFloat();
+  }
+  if (rainfall.length() > 0) {
+    weatherRainfall = rainfall.toFloat();
+  }
+  if (wind.length() > 0) {
+    weatherWind = wind.toFloat();
+  }
+
+  sendOkJson();
+}
+
 void handleState() {
   String temperatureJson = jsonNumber(temperature);
   String humidityJson = jsonNumber(humidity);
+  String outsideTemperatureJson = jsonNumber(weatherOutsideTemperature);
   int red;
   int green;
   int blue;
@@ -305,7 +362,7 @@ void handleState() {
   json += "\"motion\":false,";
   json += "\"illuminance\":0";
   json += "},";
-  json += "\"weather\":{\"status\":\"WiFi\",\"sky\":\"-\",\"rainType\":\"-\",\"rainfall\":0,\"wind\":0,\"outsideTemperature\":0},";
+  json += "\"weather\":{\"status\":" + jsonString(weatherStatus) + ",\"sky\":\"-\",\"rainType\":\"-\",\"rainfall\":" + String(weatherRainfall, 1) + ",\"wind\":" + String(weatherWind, 1) + ",\"outsideTemperature\":" + outsideTemperatureJson + "},";
   json += "\"led\":{\"power\":" + String(ledPower ? "true" : "false") + ",\"mode\":\"" + activeModeLower() + "\",\"rgb\":[" + String(red) + "," + String(green) + "," + String(blue) + "],\"colorName\":\"" + activeMode + "\",\"brightness\":" + String(ledBrightness) + "},";
   json += "\"footLight\":{\"power\":" + String(ledPower ? "true" : "false") + ",\"auto\":false,\"trigger\":\"D19 mirrors main LED\",\"timeoutSeconds\":0},";
   json += "\"lcd\":{\"line1\":\"" + String(ledPower ? "LED ON " : "LED OFF ") + String(ledBrightness) + "%\",\"line2\":\"T:" + dhtValueText(temperature) + " H:" + dhtValueText(humidity) + "\",\"message\":\"ESP32 live\"},";
@@ -408,6 +465,12 @@ String jsonNumber(float value) {
   return String(value, 1);
 }
 
+String jsonString(String value) {
+  value.replace("\\", "\\\\");
+  value.replace("\"", "\\\"");
+  return "\"" + value + "\"";
+}
+
 String sensorText() {
   if (isnan(temperature) || isnan(humidity)) {
     return "no data";
@@ -434,9 +497,12 @@ String dhtValueText(float value) {
 
 String dustStatusText() {
   if (dustUg > 150) {
-    return "Bad";
+    return "Very Bad";
   }
   if (dustUg > 80) {
+    return "Bad";
+  }
+  if (dustUg > 30) {
     return "Normal";
   }
   return "Good";
@@ -512,6 +578,8 @@ void setupRoutes() {
   server.on("/mode", HTTP_OPTIONS, handleOptions);
   server.on("/color", HTTP_POST, handleColor);
   server.on("/color", HTTP_OPTIONS, handleOptions);
+  server.on("/weather", HTTP_POST, handleWeather);
+  server.on("/weather", HTTP_OPTIONS, handleOptions);
   server.on("/state", HTTP_GET, handleState);
   server.on("/state", HTTP_OPTIONS, handleOptions);
   server.begin();
@@ -542,6 +610,7 @@ void loop() {
   server.handleClient();
   readButtons();
   readSensors();
+  updateAutoRainbow();
   updateOled();
 }
 
@@ -630,14 +699,16 @@ void readDustSensor() {
   if (density < 0) {
     density = 0;
   }
-  if (density > 500) {
-    density = 500;
-  }
-  dustUg = (int)density;
+  dustUg = (int)calibratedDustDensity(density);
 }
 
 void setDustLed(bool on) {
   digitalWrite(DUST_LED_PIN, on == DUST_LED_ACTIVE_HIGH ? HIGH : LOW);
+}
+
+float calibratedDustDensity(float density) {
+  float calibrated = ((density - DUST_BASELINE_DENSITY) * DUST_CAL_SCALE) + DUST_BASELINE_OUTPUT;
+  return constrain(calibrated, 0, 300);
 }
 
 void updateOled() {
@@ -646,25 +717,37 @@ void updateOled() {
   }
 
   lastOledUpdate = millis();
-  oledPage = (oledPage + 1) % 3;
   oled.clearDisplay();
 
   if (oledPage == 0) {
-    drawOledPage("ESP32 LED", WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "Setup:192.168.4.1", "LED " + String(ledPower ? "ON" : "OFF") + " " + String(ledBrightness) + "%", "Mode " + activeMode);
-  } else if (oledPage == 1) {
-    drawOledPage("DHT11", sensorText(), "Dust " + String(dustUg) + "ug", "Vo " + String(dustSensorVoltage, 2) + "V");
+    drawOledPage(
+      "SENSOR SUMMARY",
+      "T:" + dhtValueText(temperature) + "C H:" + dhtValueText(humidity) + "%",
+      "Dust " + String(dustUg) + "ug/m3",
+      "Air " + dustStatusText(),
+      "WX " + oledWeatherLine()
+    );
   } else {
-    drawOledPage("Wi-Fi", WiFi.status() == WL_CONNECTED ? "Connected" : "Setup AP", "AP ESP32-Setup", WiFi.status() == WL_CONNECTED ? WiFi.SSID() : "192.168.4.1");
+    drawOledPage(
+      "LED STATUS",
+      oledColorLine(),
+      "Mode " + activeMode,
+      "Bright " + String(ledBrightness) + "%",
+      ledPower ? "Power ON" : "Power OFF"
+    );
   }
+
+  oledPage = (oledPage + 1) % 2;
 }
 
-void drawOledPage(String title, String line1, String line2, String line3) {
+void drawOledPage(String title, String line1, String line2, String line3, String line4) {
   oled.setPowerSave(0);
   oled.drawString(0, 0, fitOled(title).c_str());
   oled.drawString(0, 1, "----------------");
   oled.drawString(0, 3, fitOled(line1).c_str());
   oled.drawString(0, 4, fitOled(line2).c_str());
   oled.drawString(0, 5, fitOled(line3).c_str());
+  oled.drawString(0, 6, fitOled(line4).c_str());
 }
 
 String fitOled(String text) {
@@ -674,6 +757,46 @@ String fitOled(String text) {
     return text.substring(0, 16);
   }
   return text;
+}
+
+String oledWeatherLine() {
+  String line = weatherFeedback;
+  if (!isnan(weatherOutsideTemperature)) {
+    line += " " + String(weatherOutsideTemperature, 0) + "C";
+  }
+  return line;
+}
+
+String oledColorLine() {
+  if (!ledPower) {
+    return "Color OFF";
+  }
+  if (activeMode == "MANUAL") {
+    return "RGB " + String(manualRed) + "," + String(manualGreen) + "," + String(manualBlue);
+  }
+  if (activeMode == "REST") {
+    return "Color Warm";
+  }
+  if (activeMode == "STUDY") {
+    return "Color Cool";
+  }
+  String line = "Auto ";
+  line += autoRainbowNames[autoRainbowIndex];
+  return line;
+}
+
+void updateAutoRainbow() {
+  if (!ledPower || activeMode != "AUTO") {
+    return;
+  }
+
+  if (millis() - lastAutoRainbowUpdate < AUTO_RAINBOW_INTERVAL_MS) {
+    return;
+  }
+
+  lastAutoRainbowUpdate = millis();
+  autoRainbowIndex = (autoRainbowIndex + 1) % AUTO_RAINBOW_COUNT;
+  applyLedOutput();
 }
 
 void applyLedOutput() {
@@ -721,7 +844,7 @@ void currentLedRgb(int &red, int &green, int &blue) {
     blue = 255;
     return;
   }
-  red = 200;
-  green = 255;
-  blue = 220;
+  red = autoRainbowColors[autoRainbowIndex][0];
+  green = autoRainbowColors[autoRainbowIndex][1];
+  blue = autoRainbowColors[autoRainbowIndex][2];
 }

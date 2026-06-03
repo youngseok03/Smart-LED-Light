@@ -88,6 +88,13 @@ type BridgeStateResponse = {
   sensor?: LiveSensorState | null;
 };
 
+type WeatherApiResponse = {
+  ok: boolean;
+  weather?: DashboardData["weather"];
+  source?: string;
+  error?: string;
+};
+
 type ColorPreset = {
   name: string;
   rgb: [number, number, number];
@@ -120,6 +127,72 @@ const brightnessUrl = `${esp32BaseUrl}/brightness`;
 const modeUrl = `${esp32BaseUrl}/mode`;
 const colorUrl = `${esp32BaseUrl}/color`;
 const stateUrl = `${esp32BaseUrl}/state`;
+const esp32WeatherUrl = `${esp32BaseUrl}/weather`;
+const weatherUrl = "/api/weather";
+const weatherTestUrl = "/api/weather-test";
+const weatherOverrideStorageKey = "smartLedWeatherOverride";
+const weatherTestPresets: Record<string, DashboardData["weather"]> = {
+  rain: {
+    status: "비",
+    sky: "흐림",
+    rainType: "비",
+    rainfall: 5,
+    wind: 4,
+    outsideTemperature: 22,
+  },
+  clear: {
+    status: "맑음",
+    sky: "맑음",
+    rainType: "없음",
+    rainfall: 0,
+    wind: 1.5,
+    outsideTemperature: 27,
+  },
+  cold: {
+    status: "추움",
+    sky: "맑음",
+    rainType: "없음",
+    rainfall: 0,
+    wind: 3.2,
+    outsideTemperature: -5,
+  },
+  snow: {
+    status: "눈",
+    sky: "흐림",
+    rainType: "눈",
+    rainfall: 1,
+    wind: 2.5,
+    outsideTemperature: -2,
+  },
+};
+type WeatherTestName = "rain" | "clear" | "cold" | "snow";
+const weatherTestControls: Array<{
+  key: WeatherTestName;
+  label: string;
+  rgb: [number, number, number];
+  colorName: string;
+}> = [
+  { key: "rain", label: "\uBE44", rgb: [40, 120, 255], colorName: "Rain test" },
+  { key: "clear", label: "\uB9D1\uC74C", rgb: [255, 210, 70], colorName: "Clear test" },
+  { key: "cold", label: "\uCD94\uC6C0", rgb: [80, 220, 255], colorName: "Cold test" },
+  { key: "snow", label: "\uB208", rgb: [245, 250, 255], colorName: "Snow test" },
+];
+
+function readWeatherOverride(): DashboardData["weather"] | null {
+  const params = new URLSearchParams(window.location.search);
+  const testName = params.get("weatherTest");
+  if (testName === "off" || testName === "api") {
+    window.localStorage.removeItem(weatherOverrideStorageKey);
+    return null;
+  }
+  if (testName && weatherTestPresets[testName]) {
+    const weather = weatherTestPresets[testName];
+    window.localStorage.setItem(weatherOverrideStorageKey, JSON.stringify(weather));
+    return weather;
+  }
+
+  return null;
+}
 
 function rgbValue(rgb: [number, number, number]) {
   return `rgb(${rgb.join(", ")})`;
@@ -192,6 +265,17 @@ function wheelPointFromRgb(rgb: [number, number, number]) {
   };
 }
 
+function weatherFeedbackForOled(weather: DashboardData["weather"]) {
+  const combined = `${weather.status} ${weather.sky} ${weather.rainType}`;
+  if (combined.includes("\uB208")) return "Snow";
+  if (combined.includes("\uBE44")) return weather.rainfall > 0 ? `Rain ${weather.rainfall}mm` : "Rain";
+  if (weather.rainfall > 0) return `Rain ${weather.rainfall}mm`;
+  if (combined.includes("\uD750\uB9BC")) return "Cloudy";
+  if (combined.includes("\uAD6C\uB984")) return "Cloudy";
+  if (combined.includes("\uB9D1\uC74C")) return "Clear";
+  return weather.status || "-";
+}
+
 export default function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -206,6 +290,9 @@ export default function App() {
   const [wheelPoint, setWheelPoint] = useState({ x: 78, y: 50 });
   const [bridgeStatus, setBridgeStatus] = useState(`ESP32 ${esp32BaseUrl}`);
   const [liveSensor, setLiveSensor] = useState<LiveSensorState | null>(null);
+  const [liveWeather, setLiveWeather] = useState<DashboardData["weather"] | null>(null);
+  const [weatherOverride, setWeatherOverride] = useState<DashboardData["weather"] | null>(() => readWeatherOverride());
+  const [weatherApiSource, setWeatherApiSource] = useState("");
 
   useEffect(() => {
     async function loadDashboard() {
@@ -225,6 +312,142 @@ export default function App() {
 
     loadDashboard();
   }, []);
+
+  useEffect(() => {
+    function syncWeatherOverride() {
+      setWeatherOverride(readWeatherOverride());
+    }
+
+    window.addEventListener("storage", syncWeatherOverride);
+    window.addEventListener("focus", syncWeatherOverride);
+    window.addEventListener("smart-led-weather-override", syncWeatherOverride);
+    return () => {
+      window.removeEventListener("storage", syncWeatherOverride);
+      window.removeEventListener("focus", syncWeatherOverride);
+      window.removeEventListener("smart-led-weather-override", syncWeatherOverride);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (weatherOverride) {
+      void sendWeatherToEsp32(weatherOverride);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadWeatherState() {
+      try {
+        const response = await fetch(weatherUrl, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = (await response.json()) as WeatherApiResponse;
+        if (cancelled || !payload.ok || !payload.weather) return;
+
+        setLiveWeather(payload.weather);
+        setWeatherApiSource(payload.source ?? "api");
+        void sendWeatherToEsp32(payload.weather);
+      } catch (error) {
+        console.warn("Weather API request failed", error);
+      }
+    }
+
+    void loadWeatherState();
+    const intervalId = window.setInterval(loadWeatherState, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [weatherOverride]);
+
+  async function sendWeatherToEsp32(weather: DashboardData["weather"]) {
+    try {
+      await fetch(esp32WeatherUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: weather.status,
+          feedback: weatherFeedbackForOled(weather),
+          outsideTemperature: weather.outsideTemperature,
+          rainfall: weather.rainfall,
+          wind: weather.wind,
+        }),
+      });
+    } catch (error) {
+      console.warn("ESP32 weather push failed", error);
+    }
+  }
+
+  async function applyWeatherTest(testName: WeatherTestName) {
+    const control = weatherTestControls.find((item) => item.key === testName);
+    const weather = weatherTestPresets[testName];
+    if (!control || !weather) return;
+
+    setBridgeStatus(`Weather test ${control.label} applied`);
+    setLiveWeather(weather);
+    setWeatherApiSource("test");
+    setWeatherOverride(weather);
+    setWheelPoint(wheelPointFromRgb(control.rgb));
+    setLed((current) => ({
+      ...current,
+      power: true,
+      mode: "manual",
+      brightness: 80,
+      rgb: control.rgb,
+      colorName: control.colorName,
+    }));
+
+    void fetch(weatherTestUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(weather),
+    }).catch((error) => console.warn("Weather test API failed", error));
+    void Promise.allSettled([
+      fetch(bridgeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ power: "on" }),
+      }),
+      fetch(brightnessUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brightness: 80 }),
+      }),
+      fetch(esp32WeatherUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: weather.status,
+          feedback: weatherFeedbackForOled(weather),
+          outsideTemperature: weather.outsideTemperature,
+          rainfall: weather.rainfall,
+          wind: weather.wind,
+        }),
+      }),
+      fetch(colorUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rgb: control.rgb }),
+      }),
+    ]).then((results) => {
+      if (results.some((result) => result.status === "rejected")) {
+        console.warn("One or more ESP32 weather test requests failed", results);
+      }
+    });
+  }
+
+  async function restoreLiveWeather() {
+    setBridgeStatus("Weather API restored");
+    setWeatherOverride(null);
+    setWeatherApiSource("api");
+    setLiveWeather(null);
+    void fetch(weatherTestUrl, { method: "DELETE" }).catch((error) => console.warn("Weather test clear failed", error));
+    void fetch(modeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "AUTO" }),
+    }).catch((error) => console.warn("ESP32 mode restore failed", error));
+    setLed((current) => ({ ...current, mode: "auto", colorName: "AUTO" }));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -270,7 +493,8 @@ export default function App() {
   }
 
   const indoor = dashboard?.indoor;
-  const weather = dashboard?.weather;
+  const weather = weatherOverride ?? liveWeather ?? dashboard?.weather;
+  const weatherTitle = weatherOverride || weatherApiSource === "test" ? "Weather API (TEST)" : "Weather API";
   const footLight = dashboard?.footLight;
   const lcd = dashboard?.lcd;
   const ai = dashboard?.ai;
@@ -560,13 +784,31 @@ export default function App() {
 
       <section className="dataZone" aria-label="센서와 API 데이터">
         <DataColumn
-          title="Weather API"
+          title={weatherTitle}
           rows={[
+            ["상태", weather?.status ?? "-", CloudRain],
             ["하늘", weather?.sky ?? "-", Sun],
             ["강수", weather?.rainType ?? "-", CloudRain],
             ["강수량", `${weather?.rainfall ?? "-"}mm`, Gauge],
+            ["외부온도", `${weather?.outsideTemperature ?? "-"}C`, Thermometer],
             ["풍속", `${weather?.wind ?? "-"}m/s`, Wind],
           ]}
+          footer={
+            <div className="weatherTestButtons">
+              {weatherTestControls.map((control) => (
+                <button
+                  key={control.key}
+                  type="button"
+                  onClick={() => void applyWeatherTest(control.key)}
+                >
+                  {control.label}
+                </button>
+              ))}
+              <button className="apiButton" type="button" onClick={() => void restoreLiveWeather()}>
+                API
+              </button>
+            </div>
+          }
         />
         <DataColumn
           title="Indoor Sensors"
@@ -606,7 +848,7 @@ function SectionTitle({ icon: Icon, label, value }: { icon: LucideIcon; label: s
 
 type DataRow = [label: string, value: string, icon: LucideIcon];
 
-function DataColumn({ title, rows }: { title: string; rows: DataRow[] }) {
+function DataColumn({ title, rows, footer }: { title: string; rows: DataRow[]; footer?: React.ReactNode }) {
   return (
     <div className="dataColumn">
       <p className="eyebrow">{title}</p>
@@ -621,6 +863,7 @@ function DataColumn({ title, rows }: { title: string; rows: DataRow[] }) {
           </div>
         ))}
       </dl>
+      {footer ? <div className="dataColumnFooter">{footer}</div> : null}
     </div>
   );
 }
