@@ -77,3 +77,29 @@ LDR AO / A0  -> Arduino A0
 5. 센서를 손으로 가리거나 빛을 비춰 `raw` 값이 변하는지 확인합니다.
 
 값의 방향은 모듈 회로에 따라 다를 수 있습니다. 일반적으로 raw 값이 안정적으로 변하면 센서와 배선은 정상입니다.
+
+## Arduino Uno PIR + LDR + WS2812 LED Strip
+
+폴더:
+
+```text
+arduino/sensor_tests/Uno_PIR_LDR_LED_Strip/Uno_PIR_LDR_LED_Strip.ino
+```
+
+```text
+PIR VCC       -> Arduino 5V
+PIR GND       -> Arduino GND
+PIR OUT       -> Arduino D2
+LDR VCC / +   -> Arduino 5V
+LDR GND / -   -> Arduino GND
+LDR AO / A0   -> Arduino A0
+WS2812 DIN    -> Arduino D4
+WS2812 5V     -> 외부 5V 전원 권장
+WS2812 GND    -> 외부 전원 GND 및 Arduino GND
+```
+
+Arduino IDE의 Library Manager에서 `Adafruit NeoPixel` 라이브러리를 설치해야 합니다. Serial Monitor baud rate는 `9600`입니다.
+
+PIR 센서 안정화를 위해 부팅 후 30초 동안 대기합니다. 조도값이 `400` 미만이고 움직임이 감지되면 주황색 LED가 켜집니다. 밝아지거나 움직임이 사라져 LED가 꺼지면 1분 동안 재점등하지 않습니다.
+
+30개 LED를 Arduino 5V 핀에서 직접 구동하면 전류가 부족할 수 있으므로 별도 5V 전원을 사용하고, 외부 전원과 Arduino의 GND를 반드시 공통으로 연결합니다.
